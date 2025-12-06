@@ -1,0 +1,20 @@
+type: vertical-stack
+cards:
+  - type: entities
+    title: Settings
+    entities:
+      - entity: time.standard_departure_time
+      - entity: number.manual_target_soc
+      - type: divider
+      - entity: number.price_limit_low_cheap
+      - entity: number.target_soc_at_low_price
+        name: Low Price Target SoC
+      - entity: number.price_limit_high_acceptable
+      - entity: number.target_soc_at_high_price
+        name: High Price Target SoC
+  - type: entities
+    title: Overrides
+    entities:
+      - entity: time.next_session_departure
+      - entity: number.next_session_target_soc
+      - entity: button.clear_manual_override

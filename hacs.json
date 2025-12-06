@@ -1,0 +1,7 @@
+{
+  "name": "EV Smart Charger & Load Balancer",
+  "render_readme": true,
+  "content_in_root": false,
+  "filename": "ev_smart_charger.zip",
+  "homeassistant": "2024.1.0"
+}

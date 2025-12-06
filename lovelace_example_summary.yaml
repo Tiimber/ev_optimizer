@@ -1,0 +1,2 @@
+type: markdown
+content: "{{ state_attr('sensor.charging_schedule', 'charging_summary') }}"

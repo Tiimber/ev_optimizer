@@ -1,0 +1,63 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "EV Smart Charger Setup",
+        "description": "This wizard will guide you through setting up your EV Smart Charger.\n\nWe will configure the following in steps:\n1. **Charger:** Zaptec switches and limits.\n2. **Car:** Battery sensors and charging limits.\n3. **Meter:** House load and fuses.\n4. **Planning:** Prices, Calendar, and Currencies."
+      },
+      "charger": {
+        "title": "1. Charger Setup",
+        "description": "Configure your Zaptec charger entities."
+      },
+      "car": {
+        "title": "2. Car Setup",
+        "description": "Configure your Car sensors and optional limits."
+      },
+      "meter": {
+        "title": "3. Electricity Meter",
+        "description": "Configure your P1 meter sensors and Main Fuse size.\n\n**Note:** If you have separate sensors for the Charger's current usage, add them here to improve load balancing accuracy."
+      },
+      "price_calendar": {
+        "title": "4. Price & Planning",
+        "description": "Configure Electricity Prices, Calendar integration, and general settings."
+      }
+    },
+    "error": {
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "Device is already configured",
+      "single_instance_allowed": "Only a single instance of EV Smart Charger is allowed."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configure EV Smart Charger",
+        "description": "Select which settings you want to modify:",
+        "menu_options": {
+          "charger": "Charger Settings",
+          "car": "Car Settings",
+          "meter": "Meter & Fuse Settings",
+          "price_calendar": "Price, Calendar & General"
+        }
+      },
+      "charger": {
+        "title": "Charger Settings",
+        "description": "Update Zaptec charger entities."
+      },
+      "car": {
+        "title": "Car Settings",
+        "description": "Update Car sensors and limits."
+      },
+      "meter": {
+        "title": "Meter Settings",
+        "description": "Update P1 meter and fuse settings."
+      },
+      "price_calendar": {
+        "title": "Price & Planning",
+        "description": "Update Price, Calendar, and General settings."
+      }
+    }
+  }
+}
