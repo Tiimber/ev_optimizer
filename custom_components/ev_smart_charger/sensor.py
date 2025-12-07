@@ -55,6 +55,7 @@ class EVSmartChargerStatusSensor(EVSmartChargerBaseSensor):
             "car_soc": data.get("car_soc"),
             "plugged": data.get("car_plugged"),
             "target_soc": data.get("planned_target_soc"),
+            "action_log": data.get("action_log", []) # Exposed Log
         }
 
 class EVMaxAvailableCurrentSensor(EVSmartChargerBaseSensor):
@@ -108,7 +109,6 @@ class EVChargingPlanSensor(EVSmartChargerBaseSensor):
     @property
     def extra_state_attributes(self):
         """Return the schedule for graphing."""
-        # Added 'charging_summary' here so you can access it in the UI
         return {
             "planned_target": self.coordinator.data.get("planned_target_soc"),
             "charging_summary": self.coordinator.data.get("charging_summary"),
