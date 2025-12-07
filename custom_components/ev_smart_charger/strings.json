@@ -3,11 +3,11 @@
     "step": {
       "user": {
         "title": "EV Smart Charger Setup",
-        "description": "This wizard will guide you through setting up your EV Smart Charger.\n\nWe will configure the following in steps:\n1. **Charger:** Zaptec switches and limits.\n2. **Car:** Battery sensors and charging limits.\n3. **Meter:** House load and fuses.\n4. **Planning:** Prices, Calendar, and Currencies."
+        "description": "This wizard will guide you through setting up your EV Smart Charger."
       },
       "charger": {
         "title": "1. Charger Setup",
-        "description": "Configure your Zaptec charger entities."
+        "description": "Welcome to the EV Smart Charger setup.\n\nFirst, please configure your **Zaptec charger entities**. The **Switch** is the preferred method for Start/Stop control."
       },
       "car": {
         "title": "2. Car Setup",
@@ -39,7 +39,7 @@
           "charger": "Charger Settings",
           "car": "Car Settings",
           "meter": "Meter & Fuse Settings",
-          "price_calendar": "Price, Calendar & General"
+          "price_calendar": "Price & Planning"
         }
       },
       "charger": {

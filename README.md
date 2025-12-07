@@ -18,6 +18,8 @@ It specifically targets users with **Zaptec** chargers (or similar controllable 
 
 * **Smart Scheduling:** Automatically plans charging during the cheapest hours between now and your departure time.
 * **Load Balancing:** Dynamically calculates the maximum safe current to prevent tripping your main house fuse (based on real-time P1ib meter readings).
+* **Cost Estimation:** Calculates the total session cost including Spot Price, Grid Fees, and VAT.
+
 * **Calendar Integration:** Reads your local calendar for events to set custom departure times and target charge levels automatically.
 * **Manual Overrides:** Easily override the next charging session's target percentage or departure time without affecting your standard daily schedule.
 * **Maintenance Mode:** Keeps the charger active (if price allows) after reaching the target to support battery balancing or climate control.

@@ -64,15 +64,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the initial step (Introduction)."""
+        """Handle the initial step."""
         # Check if already configured
         if self._async_current_entries():
             return self.async_abort(reason="single_instance_allowed")
 
-        if user_input is not None:
-            return await self.async_step_charger()
-
-        return self.async_show_form(step_id="user")
+        # FIX: Skip the empty Intro step and jump straight to Charger setup
+        return await self.async_step_charger()
 
     async def async_step_charger(
         self, user_input: dict[str, Any] | None = None
