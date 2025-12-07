@@ -287,11 +287,8 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
         # 1. Determine Desired State
         should_charge = data.get("should_charge_now", False)
-        
-        # Floor value to be safe
         safe_amps = math.floor(data.get("max_available_current", 0))
         
-        # Minimum charging standard is 6A. If we have less, we must stop.
         if safe_amps < 6:
             should_charge = False
         
@@ -449,8 +446,20 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             # Save the cleared state
             self._save_data()
             
+            # IMMEDIATE OFF: Force the switch off right now
+            if self.conf_keys.get("zap_switch"):
+                try:
+                    await self.hass.services.async_call(
+                        "switch", SERVICE_TURN_OFF,
+                        {"entity_id": self.conf_keys["zap_switch"]},
+                        blocking=True
+                    )
+                    self._add_log("Unplugged: Forced Zaptec Switch OFF.")
+                except Exception as e:
+                    _LOGGER.error(f"Failed to force Zaptec off: {e}")
+            
             # Force State Reset so next plug-in starts fresh logic
-            self._last_applied_state = None
+            self._last_applied_state = "stopped" # We just stopped it
             self._last_applied_car_limit = -1
 
         self.previous_plugged_state = is_plugged
