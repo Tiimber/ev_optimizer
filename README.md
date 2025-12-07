@@ -11,6 +11,7 @@ It specifically targets users with **Zaptec** chargers (or similar controllable 
 *I also have a Local Calendar integration, where I in advance have set my specific, varying, but on a recurring schedule with ten minute events of each morning, which I use for automatically starting climate just before when I leave home. I have made this calendar compatible for the available charging window as well. If people are interested, I could bake that into this integration as well, or perhaps make that available as another custom integration.*
 
 **Sample dashboard card**
+
 [![Full Dashboard Card](./dashboard_card_small.png)](./dashboard_card_full.png)
 
 ## Features
