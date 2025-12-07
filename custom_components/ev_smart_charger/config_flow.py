@@ -64,13 +64,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the initial step."""
+        """Handle the initial step (Introduction)."""
         # Check if already configured
         if self._async_current_entries():
             return self.async_abort(reason="single_instance_allowed")
 
-        # FIX: Skip the empty Intro step and jump straight to Charger setup
-        return await self.async_step_charger()
+        if user_input is not None:
+            return await self.async_step_charger()
+
+        return self.async_show_form(step_id="user")
 
     async def async_step_charger(
         self, user_input: dict[str, Any] | None = None
@@ -129,9 +131,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Required(CONF_ZAPTEC_LIMITER, default=defaults.get(CONF_ZAPTEC_LIMITER)): EntitySelector(
                 EntitySelectorConfig(domain="number")
             ),
+            # Switch is optional but preferred
             vol.Optional(CONF_ZAPTEC_SWITCH, default=defaults.get(CONF_ZAPTEC_SWITCH)): EntitySelector(
                 EntitySelectorConfig(domain="switch")
             ),
+            # Buttons are optional (fallback)
             vol.Optional(CONF_ZAPTEC_RESUME, default=defaults.get(CONF_ZAPTEC_RESUME)): EntitySelector(
                 EntitySelectorConfig(domain=["button", "switch", "script"])
             ),

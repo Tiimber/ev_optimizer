@@ -7,19 +7,73 @@
       },
       "charger": {
         "title": "1. Charger Setup",
-        "description": "Welcome to the EV Smart Charger setup.\n\nFirst, please configure your **Zaptec charger entities**. The **Switch** is the preferred method for Start/Stop control."
+        "description": "Configure your Zaptec charger entities. The **Switch** is the preferred control method.",
+        "data": {
+          "zaptec_current_limiter": "Current Limiter",
+          "zaptec_switch": "Charging Switch",
+          "zaptec_resume_button": "Resume Button",
+          "zaptec_stop_button": "Stop Button"
+        },
+        "data_description": {
+          "zaptec_current_limiter": "The entity that controls the maximum charging current (Amps).",
+          "zaptec_switch": "The main On/Off switch for the charger (Recommended). If set, buttons are ignored.",
+          "zaptec_resume_button": "Fallback: Entity to START charging if no switch is available.",
+          "zaptec_stop_button": "Fallback: Entity to STOP charging if no switch is available."
+        }
       },
       "car": {
         "title": "2. Car Setup",
-        "description": "Configure your Car sensors and optional limits."
+        "description": "Configure your Car sensors and optional limits.",
+        "data": {
+          "car_soc_sensor": "Car Battery % (SoC)",
+          "car_plugged_sensor": "Plugged In Sensor",
+          "car_capacity": "Battery Size (kWh)",
+          "car_charging_level_entity": "Car Charge Limit"
+        },
+        "data_description": {
+          "car_soc_sensor": "Sensor indicating the current battery percentage of the car.",
+          "car_plugged_sensor": "Binary sensor indicating if the charging cable is connected.",
+          "car_capacity": "The total usable battery capacity of your EV.",
+          "car_charging_level_entity": "Optional: Entity to set the charge limit (e.g. 80%) directly on the car."
+        }
       },
       "meter": {
         "title": "3. Electricity Meter",
-        "description": "Configure your P1 meter sensors and Main Fuse size.\n\n**Note:** If you have separate sensors for the Charger's current usage, add them here to improve load balancing accuracy."
+        "description": "Configure your P1 meter sensors and Main Fuse size.",
+        "data": {
+          "p1_l1_sensor": "House Current L1",
+          "p1_l2_sensor": "House Current L2",
+          "p1_l3_sensor": "House Current L3",
+          "charger_current_l1": "Charger Current L1",
+          "charger_current_l2": "Charger Current L2",
+          "charger_current_l3": "Charger Current L3",
+          "max_fuse": "Main Fuse Size"
+        },
+        "data_description": {
+          "p1_l1_sensor": "Real-time current (Amps) on Phase 1 from your main meter.",
+          "p1_l2_sensor": "Real-time current (Amps) on Phase 2 from your main meter.",
+          "p1_l3_sensor": "Real-time current (Amps) on Phase 3 from your main meter.",
+          "charger_current_l1": "Optional: Specific current usage of the charger (L1). Helps calculate net house load.",
+          "charger_current_l2": "Optional: Specific current usage of the charger (L2).",
+          "charger_current_l3": "Optional: Specific current usage of the charger (L3).",
+          "max_fuse": "The size of your main household fuse (Amps) to prevent tripping."
+        }
       },
       "price_calendar": {
         "title": "4. Price & Planning",
-        "description": "Configure Electricity Prices, Calendar integration, and general settings."
+        "description": "Configure Electricity Prices, Calendar integration, and general settings.",
+        "data": {
+          "price_sensor": "Nordpool Price Sensor",
+          "calendar_entity": "Planning Calendar",
+          "charger_loss": "Charger Efficiency Loss",
+          "currency": "Currency"
+        },
+        "data_description": {
+          "price_sensor": "Optional: Nordpool sensor for spot prices. If empty, runs in simple Load Balancing mode.",
+          "calendar_entity": "Optional: Local Calendar to read for departure times and target SoC (e.g. 'Trip 90%').",
+          "charger_loss": "Estimated energy loss during charging (usually 5-10%).",
+          "currency": "Currency symbol to display in cost summaries."
+        }
       }
     },
     "error": {
