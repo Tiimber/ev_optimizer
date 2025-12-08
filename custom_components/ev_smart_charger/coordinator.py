@@ -149,7 +149,6 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 for key in [ENTITY_DEPARTURE_TIME, ENTITY_DEPARTURE_OVERRIDE]:
                     if key in settings and settings[key]:
                         try:
-                            # Expecting "HH:MM" format
                             parts = settings[key].split(":")
                             settings[key] = time(int(parts[0]), int(parts[1]))
                         except Exception:
@@ -257,7 +256,9 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             await self._handle_plugged_event(data["car_plugged"], data)
 
             # 5. Logic: Load Balancing
-            data["max_available_current"] = self._calculate_load_balancing(data)
+            data["max_available_current"] = self._calculate_load_balancing(
+                data["p1_l1"], data["p1_l2"], data["p1_l3"]
+            )
 
             # 6. Logic: Price Analysis (Simple status)
             data["current_price_status"] = self._analyze_prices(data["price_data"])
@@ -287,9 +288,14 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
         # 1. Determine Desired State
         should_charge = data.get("should_charge_now", False)
+        
+        # Floor value to be safe
         safe_amps = math.floor(data.get("max_available_current", 0))
         
+        # Minimum charging standard is 6A. If we have less, we must stop.
         if safe_amps < 6:
+            if should_charge:
+                self._add_log(f"Safety Cutoff: Available {safe_amps}A is below minimum 6A. Stopping.")
             should_charge = False
         
         # 2. Control Car Charge Limit
