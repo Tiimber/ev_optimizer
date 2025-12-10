@@ -76,6 +76,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         self._last_applied_state = None # "charging" or "paused"
         self._last_applied_car_limit = -1
         
+        # Virtual SoC Estimator
+        self._virtual_soc = 0.0
+        self._last_update_time = datetime.now()
+        
         # New Flag: Tracks if user explicitly moved the Next Session slider
         self.manual_override_active = False 
         
@@ -263,7 +267,6 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                     _LOGGER.warning(f"Failed to fetch calendar events: {e}")
 
             # 6. Logic: Load Balancing
-            # FIX: Updated to call with 'data' dict, not individual arguments
             data["max_available_current"] = self._calculate_load_balancing(data)
 
             # 7. Logic: Price Analysis (Simple status)
@@ -290,13 +293,15 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         current_time = datetime.now()
         sensor_soc = data.get("car_soc", 0.0)
         
-        # 1. Sync: If car sensor reports HIGHER than our estimate, trust the car.
-        #    Also sync if we just initialized (0.0).
-        if sensor_soc > self._virtual_soc or self._virtual_soc == 0.0:
+        # 1. Sync Logic
+        # Sync if car sensor reports HIGHER than our estimate (it updated).
+        # OR if we are NOT in 'charging' state (paused/stopped), force strict sync to sensor.
+        # This prevents "Virtual Drift" where we think we are at 100% but car is 80%.
+        if sensor_soc > self._virtual_soc or self._virtual_soc == 0.0 or self._last_applied_state != "charging":
             self._virtual_soc = sensor_soc
         
-        # 2. Estimate: If we were charging in the last interval, estimate gain.
-        #    We check if we told the charger to be ON and gave it Amps.
+        # 2. Estimate Logic
+        # Only estimate if we are ACTIVELY charging (Switch ON + Amps > 0)
         if self._last_applied_state == "charging" and self._last_applied_amps > 0:
             
             # Calculate time delta in hours
@@ -340,6 +345,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             if should_charge:
                 self._add_log(f"Safety Cutoff: Available {safe_amps}A is below minimum 6A. Pausing.")
             should_charge = False
+            
+        # Determine Target Amps based on State
+        # If paused, we force 0A. If charging, we use calculated safe amps.
+        target_amps = safe_amps if should_charge else 0
         
         # 2. Control Car Charge Limit
         if self.conf_keys["car_limit"]:
@@ -356,64 +365,90 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 except Exception as e:
                     _LOGGER.error(f"Failed to set Car Charge Limit: {e}")
 
-        # 3. Control Current Limiter
-        if safe_amps != self._last_applied_amps and self.conf_keys["zap_limit"]:
-            try:
-                await self.hass.services.async_call(
-                    "number", "set_value",
-                    {"entity_id": self.conf_keys["zap_limit"], "value": safe_amps},
-                    blocking=True
-                )
-                self._last_applied_amps = safe_amps
-                self._add_log(f"Load Balancing: Set Zaptec limit to {safe_amps}A")
-            except Exception as e:
-                _LOGGER.error(f"Failed to set Zaptec limit: {e}")
-
-        # 4. Control Start/Stop (Use Switch if available)
+        # 3. Control Start/Stop (Switch Logic)
         desired_state = "charging" if should_charge else "paused"
         
-        if desired_state != self._last_applied_state:
-            try:
-                # PREFERRED METHOD: Use the single Switch
-                if self.conf_keys.get("zap_switch"):
-                    service = SERVICE_TURN_ON if should_charge else SERVICE_TURN_OFF
+        # Order of Operations:
+        # - If Charging: Turn Switch ON, then Set Amps.
+        # - If Pausing: Set Amps 0, then Turn Switch OFF.
+        
+        if should_charge:
+            # ---> CHARGING SEQUENCE <---
+            
+            # A. Ensure Switch is ON
+            if desired_state != self._last_applied_state:
+                try:
+                    if self.conf_keys.get("zap_switch"):
+                        await self.hass.services.async_call(
+                            "switch", SERVICE_TURN_ON,
+                            {"entity_id": self.conf_keys["zap_switch"]},
+                            blocking=True
+                        )
+                        self._add_log(f"Switched Charging state to: CHARGING")
+                    elif self.conf_keys.get("zap_resume"):
+                         # Fallback button
+                        await self.hass.services.async_call(
+                            "button", "press",
+                            {"entity_id": self.conf_keys["zap_resume"]},
+                            blocking=True
+                        )
+                        self._add_log("Sent Resume command")
+                    
+                    self._last_applied_state = "charging"
+                except Exception as e:
+                    _LOGGER.error(f"Failed to switch Zaptec state to CHARGING: {e}")
+
+            # B. Control Current Limiter
+            if target_amps != self._last_applied_amps and self.conf_keys["zap_limit"]:
+                try:
                     await self.hass.services.async_call(
-                        "switch", service,
-                        {"entity_id": self.conf_keys["zap_switch"]},
+                        "number", "set_value",
+                        {"entity_id": self.conf_keys["zap_limit"], "value": target_amps},
                         blocking=True
                     )
+                    self._last_applied_amps = target_amps
+                    self._add_log(f"Load Balancing: Set Zaptec limit to {target_amps}A")
+                except Exception as e:
+                    _LOGGER.error(f"Failed to set Zaptec limit: {e}")
+
+        else:
+            # ---> PAUSING SEQUENCE <---
+            
+            # A. Set Amps to 0 first (Soft Stop)
+            if target_amps != self._last_applied_amps and self.conf_keys["zap_limit"]:
+                try:
+                    await self.hass.services.async_call(
+                        "number", "set_value",
+                        {"entity_id": self.conf_keys["zap_limit"], "value": 0},
+                        blocking=True
+                    )
+                    self._last_applied_amps = 0
+                    self._add_log(f"Pausing: Set Zaptec limit to 0A")
+                except Exception as e:
+                    _LOGGER.error(f"Failed to set Zaptec limit to 0: {e}")
+
+            # B. Turn Switch OFF
+            if desired_state != self._last_applied_state:
+                try:
+                    if self.conf_keys.get("zap_switch"):
+                        await self.hass.services.async_call(
+                            "switch", SERVICE_TURN_OFF,
+                            {"entity_id": self.conf_keys["zap_switch"]},
+                            blocking=True
+                        )
+                        self._add_log(f"Switched Charging state to: PAUSED")
+                    elif self.conf_keys.get("zap_stop"):
+                        # Fallback button
+                        await self.hass.services.async_call(
+                            "button", "press",
+                            {"entity_id": self.conf_keys["zap_stop"]},
+                            blocking=True
+                        )
+                        self._add_log("Sent Stop command")
                     
-                    # Log message based on state
-                    action = "Resuming charging" if should_charge else "Pausing charging"
-                    self._add_log(f"{action} (State: {desired_state.upper()})")
-                
-                # FALLBACK METHOD: Separate Buttons
-                else:
-                    if should_charge:
-                        if self.conf_keys.get("zap_resume"):
-                            domain = self.conf_keys["zap_resume"].split(".")[0]
-                            service = "press" if domain == "button" else "turn_on"
-                            await self.hass.services.async_call(
-                                domain, service,
-                                {"entity_id": self.conf_keys["zap_resume"]},
-                                blocking=True
-                            )
-                            self._add_log("Sent Resume command to Zaptec")
-                    else:
-                        if self.conf_keys.get("zap_stop"):
-                            domain = self.conf_keys["zap_stop"].split(".")[0]
-                            service = "press" if domain == "button" else "turn_on"
-                            await self.hass.services.async_call(
-                                domain, service,
-                                {"entity_id": self.conf_keys["zap_stop"]},
-                                blocking=True
-                            )
-                            self._add_log("Sent Pause/Stop command to Zaptec")
-                        
-                self._last_applied_state = desired_state
-                
-            except Exception as e:
-                _LOGGER.error(f"Failed to switch Zaptec state to {desired_state}: {e}")
+                    self._last_applied_state = "paused"
+                except Exception as e:
+                    _LOGGER.error(f"Failed to switch Zaptec state to PAUSED: {e}")
 
 
     def _fetch_sensor_data(self) -> dict:
