@@ -235,7 +235,6 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             self._update_virtual_soc(data)
             # OVERWRITE the sensor soc with our better estimate if needed
             # This ensures the planning logic runs on the most accurate number we have
-            # If original sensor was None/Unknown, use Virtual (which defaults to 0 or last known)
             data["car_soc"] = self._virtual_soc
             
             # 5. Fetch Calendar Events
@@ -296,6 +295,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         
         # 1. Sync Logic
         # Sync if sensor is valid AND (Higher than estimate OR we are not charging)
+        # This allows the car's real sensor to correct our drift upwards, but prevents it from dragging us down if it's stale.
         if sensor_soc is not None:
             if sensor_soc > self._virtual_soc or self._virtual_soc == 0.0 or self._last_applied_state != "charging":
                 self._virtual_soc = float(sensor_soc)
@@ -334,8 +334,14 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                     added_percent = (added_kwh / self.car_capacity) * 100.0
                     self._virtual_soc += added_percent
                     
-                    # Cap at 100
-                    if self._virtual_soc > 100:
+                    # Cap at Physical Car Limit (if we know it)
+                    # This prevents the estimator from drifting past the point where the car stopped itself.
+                    if self._last_applied_car_limit > 0:
+                        if self._virtual_soc > self._last_applied_car_limit:
+                            self._virtual_soc = float(self._last_applied_car_limit)
+                    
+                    # Absolute Cap at 100
+                    if self._virtual_soc > 100.0:
                         self._virtual_soc = 100.0
 
         self._last_update_time = current_time
