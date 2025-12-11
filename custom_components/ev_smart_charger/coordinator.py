@@ -235,6 +235,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             self._update_virtual_soc(data)
             # OVERWRITE the sensor soc with our better estimate if needed
             # This ensures the planning logic runs on the most accurate number we have
+            # If original sensor was None/Unknown, use Virtual (which defaults to 0 or last known)
             data["car_soc"] = self._virtual_soc
             
             # 5. Fetch Calendar Events
@@ -291,42 +292,51 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
     def _update_virtual_soc(self, data: dict):
         """Update the internal estimated SoC based on charging activity."""
         current_time = datetime.now()
-        sensor_soc = data.get("car_soc", 0.0)
+        sensor_soc = data.get("car_soc")
         
         # 1. Sync Logic
-        # Sync if car sensor reports HIGHER than our estimate (it updated).
-        # OR if we are NOT in 'charging' state (paused/stopped), force strict sync to sensor.
-        # This prevents "Virtual Drift" where we think we are at 100% but car is 80%.
-        if sensor_soc > self._virtual_soc or self._virtual_soc == 0.0 or self._last_applied_state != "charging":
-            self._virtual_soc = sensor_soc
+        # Sync if sensor is valid AND (Higher than estimate OR we are not charging)
+        if sensor_soc is not None:
+            if sensor_soc > self._virtual_soc or self._virtual_soc == 0.0 or self._last_applied_state != "charging":
+                self._virtual_soc = float(sensor_soc)
         
         # 2. Estimate Logic
-        # Only estimate if we are ACTIVELY charging (Switch ON + Amps > 0)
-        if self._last_applied_state == "charging" and self._last_applied_amps > 0:
+        # Only estimate if we are ACTIVELY charging
+        if self._last_applied_state == "charging":
             
-            # Calculate time delta in hours
-            seconds_passed = (current_time - self._last_update_time).total_seconds()
-            hours_passed = seconds_passed / 3600.0
+            # Use Real Charger Current if available (More accurate than Target Amps)
+            ch_l1 = data.get("ch_l1", 0.0)
+            ch_l2 = data.get("ch_l2", 0.0)
+            ch_l3 = data.get("ch_l3", 0.0)
+            measured_amps = max(ch_l1, ch_l2, ch_l3)
             
-            # Estimate Power (3-phase 230V standard)
-            # P (kW) = 3 * 230V * Amps / 1000
-            estimated_power_kw = (3 * 230 * self._last_applied_amps) / 1000.0
+            # Fallback to Target Amps if no sensor or sensor reads 0 while active
+            used_amps = measured_amps if measured_amps > 0.5 else self._last_applied_amps
             
-            # Efficiency Factor
-            efficiency_pct = self.entry.data.get(CONF_CHARGER_LOSS, 10.0)
-            efficiency_factor = 1.0 - (efficiency_pct / 100.0)
-            
-            # Energy to Battery
-            added_kwh = estimated_power_kw * hours_passed * efficiency_factor
-            
-            # Convert to % SoC
-            if self.car_capacity > 0:
-                added_percent = (added_kwh / self.car_capacity) * 100.0
-                self._virtual_soc += added_percent
+            if used_amps > 0:
+                # Calculate time delta in hours
+                seconds_passed = (current_time - self._last_update_time).total_seconds()
+                hours_passed = seconds_passed / 3600.0
                 
-                # Cap at 100
-                if self._virtual_soc > 100:
-                    self._virtual_soc = 100.0
+                # Estimate Power (3-phase 230V standard)
+                # P (kW) = 3 * 230V * Amps / 1000
+                estimated_power_kw = (3 * 230 * used_amps) / 1000.0
+                
+                # Efficiency Factor
+                efficiency_pct = self.entry.data.get(CONF_CHARGER_LOSS, 10.0)
+                efficiency_factor = 1.0 - (efficiency_pct / 100.0)
+                
+                # Energy to Battery
+                added_kwh = estimated_power_kw * hours_passed * efficiency_factor
+                
+                # Convert to % SoC
+                if self.car_capacity > 0:
+                    added_percent = (added_kwh / self.car_capacity) * 100.0
+                    self._virtual_soc += added_percent
+                    
+                    # Cap at 100
+                    if self._virtual_soc > 100:
+                        self._virtual_soc = 100.0
 
         self._last_update_time = current_time
 
@@ -475,7 +485,20 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         data["p1_l1"] = get_float(self.conf_keys["p1_l1"])
         data["p1_l2"] = get_float(self.conf_keys["p1_l2"])
         data["p1_l3"] = get_float(self.conf_keys["p1_l3"])
-        data["car_soc"] = get_float(self.conf_keys["car_soc"])
+        
+        # Check SoC Sensor Validity
+        soc_entity = self.conf_keys["car_soc"]
+        if soc_entity:
+            soc_state = self.hass.states.get(soc_entity)
+            if soc_state is None or soc_state.state in [STATE_UNAVAILABLE, STATE_UNKNOWN]:
+                 data["car_soc"] = None # Mark as unknown
+            else:
+                try:
+                    data["car_soc"] = float(soc_state.state)
+                except ValueError:
+                    data["car_soc"] = None
+        else:
+            data["car_soc"] = 0.0 # No sensor configured
         
         # Fetch Charger Current if configured
         data["ch_l1"] = get_float(self.conf_keys.get("ch_l1"))
@@ -506,7 +529,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             self._add_log("Car plugged in.")
             
             # Sync Virtual SoC to Sensor immediately on plug-in
-            self._virtual_soc = data.get("car_soc", 0.0)
+            if data.get("car_soc") is not None:
+                self._virtual_soc = data["car_soc"]
+            else:
+                self._virtual_soc = 0.0 # Start fresh if unknown
             
             soc_entity = self.conf_keys["car_soc"]
             try:
@@ -814,7 +840,12 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
         # 4. Calculate Energy Needed
         # Use our Virtual SoC (synced/estimated) instead of potentially stale sensor
-        current_soc = data.get("car_soc", 0.0)
+        # FIX: Check if car_soc is None (unavailable) first
+        current_soc = data.get("car_soc")
+        if current_soc is None:
+             # Assume 0 or fallback? Let's use 0 so it charges.
+             current_soc = 0.0
+             
         selected_slots = []
         selected_start_times = set()
         price_limit_high = data.get(ENTITY_PRICE_LIMIT_2, 1.5)
