@@ -138,6 +138,12 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         # Keep only last 50 events
         if len(self.action_log) > 50:
             self.action_log.pop()
+            
+        # Fire event for Logbook integration
+        self.hass.bus.async_fire(
+            f"{DOMAIN}_log_event", 
+            {"message": message, "name": "EV Smart Charger"}
+        )
 
     async def _load_data(self):
         """Load persisted settings from disk."""

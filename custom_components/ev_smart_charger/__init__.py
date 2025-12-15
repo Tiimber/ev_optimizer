@@ -7,6 +7,9 @@ from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
 from .coordinator import EVSmartChargerCoordinator
+# No import needed for logbook if we rely on auto-detection or manual registration if needed,
+# but custom components usually need to register logbook via 'logbook' platform or just file presence.
+# Actually, the 'logbook' file is loaded if the integration is loaded.
 
 # List the platforms that we will create entities for
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.NUMBER, Platform.SWITCH, Platform.BUTTON, Platform.TIME]
