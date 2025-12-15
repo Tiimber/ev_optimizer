@@ -23,6 +23,7 @@ async def async_setup_entry(
         EVMaxAvailableCurrentSensor(coordinator),
         EVPriceStatusSensor(coordinator),
         EVChargingPlanSensor(coordinator),
+        EVSmartChargerLastSessionSensor(coordinator), # New Sensor
     ])
 
 class EVSmartChargerBaseSensor(CoordinatorEntity, SensorEntity):
@@ -55,7 +56,7 @@ class EVSmartChargerStatusSensor(EVSmartChargerBaseSensor):
             "car_soc": data.get("car_soc"),
             "plugged": data.get("car_plugged"),
             "target_soc": data.get("planned_target_soc"),
-            "action_log": data.get("action_log", []) # Exposed Log
+            "action_log": data.get("action_log", [])
         }
 
 class EVMaxAvailableCurrentSensor(EVSmartChargerBaseSensor):
@@ -113,4 +114,36 @@ class EVChargingPlanSensor(EVSmartChargerBaseSensor):
             "planned_target": self.coordinator.data.get("planned_target_soc"),
             "charging_summary": self.coordinator.data.get("charging_summary"),
             "schedule": self.coordinator.data.get("charging_schedule", [])
+        }
+
+class EVSmartChargerLastSessionSensor(EVSmartChargerBaseSensor):
+    """Sensor containing the report for the last finished session."""
+    _attr_name = "Last Charging Session"
+    _attr_unique_id = "ev_smart_charger_last_session"
+    _attr_icon = "mdi:history"
+
+    @property
+    def state(self):
+        """Return the timestamp of the last session end."""
+        report = self.coordinator.last_session_data
+        if report:
+            return report.get("end_time")
+        return "No Data"
+
+    @property
+    def extra_state_attributes(self):
+        """Return the full report data."""
+        report = self.coordinator.last_session_data
+        if not report:
+            return {}
+            
+        return {
+            "start_time": report.get("start_time"),
+            "added_kwh": report.get("added_kwh"),
+            "cost": report.get("total_cost"),
+            "currency": report.get("currency"),
+            "start_soc": int(report.get("start_soc", 0)),
+            "end_soc": int(report.get("end_soc", 0)),
+            "graph_data": report.get("graph_data", []),
+            "session_log": report.get("session_log", [])
         }

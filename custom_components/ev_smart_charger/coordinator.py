@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import os
 from datetime import timedelta, datetime, time
 
 from homeassistant.config_entries import ConfigEntry
@@ -73,6 +74,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         self.user_settings = {} # Storage for UI inputs
         self.action_log = []    # Rolling log of actions
         
+        # Session Tracking
+        self.current_session = None # Active recording
+        self.last_session_data = None # Finished report
+        
         # State tracking to prevent API spamming
         self._last_applied_amps = -1
         self._last_applied_state = None # "charging" or "paused"
@@ -139,7 +144,11 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         if len(self.action_log) > 50:
             self.action_log.pop()
             
-        # Fire event for Logbook integration
+        # Add to current session log if active
+        if self.current_session is not None:
+             self.current_session["log"].append(entry)
+             
+        # Fire event for Logbook
         self.hass.bus.async_fire(
             f"{DOMAIN}_log_event", 
             {"message": message, "name": "EV Smart Charger"}
@@ -158,6 +167,9 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 
                 # Restore Action Log
                 self.action_log = data.get("action_log", [])
+                
+                # Restore Last Session Report
+                self.last_session_data = data.get("last_session_data")
                 
                 # Restore Settings
                 settings = data.get("user_settings", {})
@@ -190,7 +202,8 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             return {
                 "manual_override_active": self.manual_override_active,
                 "user_settings": clean_settings,
-                "action_log": self.action_log
+                "action_log": self.action_log,
+                "last_session_data": self.last_session_data
             }
             
         self.store.async_delay_save(data_to_save, 1.0)
@@ -293,6 +306,9 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             # 9. ACTUATION: Apply logic to physical charger AND car
             await self._apply_charger_control(data, plan)
             
+            # 10. SESSION RECORDING: Record current status
+            self._record_session_data(data)
+            
             # Attach log to data so Sensor can read it
             data["action_log"] = self.action_log
 
@@ -301,6 +317,182 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.error(f"Error in EV Coordinator: {err}")
             raise UpdateFailed(f"Error communicating with API: {err}")
+            
+    def _record_session_data(self, data: dict):
+        """Record data points for the current session report."""
+        if not self.current_session:
+            return
+
+        now_ts = datetime.now()
+        
+        # Calculate current cost
+        current_price = 0.0
+        try:
+            raw_prices = data["price_data"].get("today", [])
+            if raw_prices:
+                 count = len(raw_prices)
+                 idx = (now_ts.hour * 4) + (now_ts.minute // 15) if count > 25 else now_ts.hour
+                 idx = min(idx, count - 1)
+                 current_price = float(raw_prices[idx])
+        except:
+            current_price = 0.0
+            
+        # Fees/VAT
+        extra_fee = data.get(ENTITY_PRICE_EXTRA_FEE, 0.0)
+        vat_pct = data.get(ENTITY_PRICE_VAT, 0.0)
+        adjusted_price = (current_price + extra_fee) * (1 + vat_pct / 100.0)
+
+        point = {
+            "time": now_ts.isoformat(),
+            "soc": data.get("car_soc", 0),
+            "amps": self._last_applied_amps,
+            "charging": 1 if self._last_applied_state == "charging" else 0,
+            "price": adjusted_price
+        }
+        
+        self.current_session["history"].append(point)
+        
+    def _finalize_session(self):
+        """Generate the final report for the ended session."""
+        if not self.current_session: return
+        
+        report = self._calculate_session_totals()
+        
+        self.last_session_data = report
+        self._save_data()
+        
+        # GENERATE IMAGE FOR THERMAL PRINTER
+        try:
+            save_path = self.hass.config.path("www", "ev_smart_charger_last_session.png")
+            self.hass.async_add_executor_job(self._generate_report_image, report, save_path)
+        except Exception as e:
+            _LOGGER.warning(f"Could not trigger image generation: {e}")
+
+    def _calculate_session_totals(self):
+        """Calculate totals for the current session."""
+        history = self.current_session["history"]
+        if not history: 
+            return {}
+            
+        start_soc = history[0]["soc"]
+        end_soc = history[-1]["soc"]
+        
+        total_kwh = 0.0
+        total_cost = 0.0
+        
+        prev_time = datetime.fromisoformat(history[0]["time"])
+        
+        for i in range(1, len(history)):
+            curr = history[i]
+            curr_time = datetime.fromisoformat(curr["time"])
+            delta_h = (curr_time - prev_time).total_seconds() / 3600.0
+            prev_time = curr_time
+            
+            amps = history[i-1]["amps"]
+            is_charging = history[i-1]["charging"]
+            
+            if is_charging and amps > 0:
+                power = (3 * 230 * amps) / 1000.0
+                kwh = power * delta_h
+                cost = kwh * history[i-1]["price"]
+                
+                total_kwh += kwh
+                total_cost += cost
+                
+        return {
+            "start_time": self.current_session["start_time"],
+            "end_time": datetime.now().isoformat(),
+            "start_soc": start_soc,
+            "end_soc": end_soc,
+            "added_kwh": round(total_kwh, 2),
+            "total_cost": round(total_cost, 2),
+            "currency": self.currency,
+            "graph_data": history,
+            "session_log": self.current_session["log"]
+        }
+
+    def _generate_report_image(self, report: dict, file_path: str):
+        """Generate a PNG image for thermal printers."""
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+        except ImportError:
+            _LOGGER.warning("PIL (Pillow) not found. Cannot generate image.")
+            return
+
+        # Setup Canvas (576px wide is standard 80mm thermal width)
+        width = 576
+        bg_color = "white"
+        
+        # Fonts (Fallback to default if custom fonts missing)
+        try:
+            font_header = ImageFont.truetype("DejaVuSans-Bold.ttf", 24)
+            font_text = ImageFont.truetype("DejaVuSans.ttf", 18)
+            font_small = ImageFont.truetype("DejaVuSans.ttf", 14)
+        except OSError:
+            font_header = ImageFont.load_default()
+            font_text = ImageFont.load_default()
+            font_small = ImageFont.load_default()
+
+        # Create Image
+        # Estimate height: Header(60) + Info(150) + Graph(300) + Footer(50) = 560
+        height = 600
+        img = Image.new("RGB", (width, height), bg_color)
+        draw = ImageDraw.Draw(img)
+        
+        # Draw Text
+        y = 20
+        draw.text((width//2, y), "EV Charging Report", font=font_header, fill="black", anchor="mt")
+        y += 50
+        
+        lines = [
+            f"Start: {report['start_time'][:16].replace('T', ' ')}",
+            f"End:   {report['end_time'][:16].replace('T', ' ')}",
+            f"Power: {report['added_kwh']} kWh",
+            f"Cost:  {report['total_cost']} {report['currency']}",
+            f"SoC:   {int(report['start_soc'])}% -> {int(report['end_soc'])}%"
+        ]
+        
+        for line in lines:
+            draw.text((20, y), line, font=font_text, fill="black")
+            y += 30
+            
+        y += 20
+        draw.line([(10, y), (width-10, y)], fill="black", width=2)
+        y += 20
+        
+        # Draw Graph (Price bars + Charging blocks)
+        history = report.get("graph_data", [])
+        if history:
+            graph_height = 200
+            graph_width = width - 40
+            graph_bottom = y + graph_height
+            
+            # Find ranges
+            prices = [p["price"] for p in history]
+            min_p = min(prices) if prices else 0
+            max_p = max(prices) if prices else 1
+            if max_p == min_p: max_p += 1
+            
+            bar_w = max(1, graph_width / len(history))
+            
+            for i, point in enumerate(history):
+                x = 20 + (i * bar_w)
+                
+                # Price Bar (Gray)
+                p_norm = (point["price"] - min_p) / (max_p - min_p)
+                p_h = p_norm * graph_height
+                draw.rectangle([x, graph_bottom - p_h, x+bar_w, graph_bottom], fill="#ddd", outline=None)
+                
+                # Charging Block (Black overlay)
+                if point["charging"] == 1:
+                    # Draw a solid block at bottom or overlay? 
+                    # Let's draw a thick line at the bottom for "Charging active"
+                    draw.rectangle([x, graph_bottom - 20, x+bar_w, graph_bottom], fill="black", outline=None)
+
+        # Save
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        img.save(file_path)
+        _LOGGER.info(f"Saved session image to {file_path}")
 
     def _update_virtual_soc(self, data: dict):
         """Update the internal estimated SoC based on charging activity."""
@@ -575,6 +767,13 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         if is_plugged and not self.previous_plugged_state:
             self._add_log("Car plugged in.")
             
+            # Start new Session
+            self.current_session = {
+                "start_time": datetime.now().isoformat(),
+                "history": [],
+                "log": []
+            }
+            
             # Sync Virtual SoC to Sensor immediately on plug-in
             if data.get("car_soc") is not None:
                 self._virtual_soc = data["car_soc"]
@@ -592,6 +791,11 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         # Case B: Just Unplugged -> Reset Overrides to Standards
         if not is_plugged and self.previous_plugged_state:
             self._add_log("Car unplugged. Resetting settings.")
+            
+            # Finalize Session Report
+            if self.current_session:
+                self._finalize_session()
+                self.current_session = None
             
             # Reset Override Flag
             self.manual_override_active = False

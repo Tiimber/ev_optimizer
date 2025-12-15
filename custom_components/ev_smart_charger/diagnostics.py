@@ -31,6 +31,9 @@ async def async_get_config_entry_diagnostics(
             "car_limit": coordinator._last_applied_car_limit,
         },
         "virtual_soc": coordinator._virtual_soc,
+        # Add session data to diagnostics
+        "current_session": coordinator.current_session,
+        "last_session": coordinator.last_session_data,
     }
 
     return data
