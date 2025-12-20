@@ -165,14 +165,16 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def _get_car_schema(defaults=None):
         if defaults is None:
             defaults = {}
+
+        # Define options with hardcoded labels to ensure display
         refresh_options = [
-            REFRESH_NEVER,
-            REFRESH_30_MIN,
-            REFRESH_1_HOUR,
-            REFRESH_2_HOURS,
-            REFRESH_3_HOURS,
-            REFRESH_4_HOURS,
-            REFRESH_AT_TARGET,
+            {"value": REFRESH_NEVER, "label": "Never"},
+            {"value": REFRESH_30_MIN, "label": "Every 30 minutes"},
+            {"value": REFRESH_1_HOUR, "label": "Every hour"},
+            {"value": REFRESH_2_HOURS, "label": "Every 2 hours"},
+            {"value": REFRESH_3_HOURS, "label": "Every 3 hours"},
+            {"value": REFRESH_4_HOURS, "label": "Every 4 hours"},
+            {"value": REFRESH_AT_TARGET, "label": "When target reached (Smart)"},
         ]
 
         return vol.Schema(
@@ -202,7 +204,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_CAR_CHARGING_LEVEL_ENTITY,
                     default=defaults.get(CONF_CAR_CHARGING_LEVEL_ENTITY),
                 ): EntitySelector(EntitySelectorConfig(domain="number")),
-                # Shared Vehicle Device/Entity
                 vol.Optional(
                     CONF_CAR_ENTITY_ID, default=defaults.get(CONF_CAR_ENTITY_ID)
                 ): DeviceSelector(DeviceSelectorConfig()),
@@ -213,15 +214,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_CAR_REFRESH_ACTION,
                     default=defaults.get(CONF_CAR_REFRESH_ACTION),
                 ): TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT)),
-                # Added translation_key here to link to strings.json
+                # Use explicit labels here
                 vol.Optional(
                     CONF_CAR_REFRESH_INTERVAL,
                     default=defaults.get(CONF_CAR_REFRESH_INTERVAL, REFRESH_NEVER),
                 ): SelectSelector(
                     SelectSelectorConfig(
-                        options=refresh_options,
-                        mode=SelectSelectorMode.DROPDOWN,
-                        translation_key="car_refresh_interval",
+                        options=refresh_options, mode=SelectSelectorMode.DROPDOWN
                     )
                 ),
             }
