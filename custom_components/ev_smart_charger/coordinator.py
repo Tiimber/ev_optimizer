@@ -166,16 +166,19 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         )
 
     def _add_log(self, message: str):
-        """Add an entry to the action log and prune old entries."""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        """Add an entry to the action log and prune entries older than 24h."""
+        now = datetime.now()
+        timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
         entry = f"[{timestamp}] {message}"
         self.action_log.insert(0, entry)  # Prepend newest
 
         # Keep only last 24h events
-        cutoff = datetime.now() - timedelta(hours=24)
+        cutoff = now - timedelta(hours=24)
         while self.action_log:
             try:
                 last_entry = self.action_log[-1]
+                # Extract timestamp: "[YYYY-MM-DD HH:MM:SS] Message"
+                # Timestamp is between index 1 and 20
                 last_ts_str = last_entry[1:20]
                 last_dt = datetime.strptime(last_ts_str, "%Y-%m-%d %H:%M:%S")
                 if last_dt < cutoff:
@@ -183,6 +186,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 else:
                     break
             except (ValueError, IndexError):
+                # Remove malformed entries if any
                 self.action_log.pop()
 
         # Add to current session log if active
@@ -570,7 +574,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 )
             should_charge = False
 
+        # Determine Target Amps based on State
+        # If paused, we force 0A. If charging, we use calculated safe amps.
         target_amps = safe_amps if should_charge else 0
+
         desired_state = "charging" if should_charge else "paused"
 
         # --- MAINTENANCE MODE / PAUSED OVERRIDE ---
@@ -622,13 +629,14 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 except Exception as e:
                     _LOGGER.error(f"Failed to call Car Limit Service: {e}")
 
-        # 3. Control Start/Stop
-        if should_charge:
-            # ---> CHARGING / MAINTENANCE SEQUENCE <---
+        # 3. Control Start/Stop (Switch Logic)
 
-            # Only record active charging logic for slivers if Amps > 0
-            if target_amps > 0:
-                self._was_charging_in_interval = True
+        # Order of Operations:
+        # - If Charging: Turn Switch ON, then Set Amps.
+        # - If Pausing: Set Amps 0, then Turn Switch OFF.
+
+        if should_charge:
+            # ---> CHARGING SEQUENCE <---
 
             # A. Ensure Switch is ON
             if desired_state != self._last_applied_state:
@@ -645,6 +653,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                         )
                         self._add_log(f"Switched Charging state to: {state_msg}")
                     elif self.conf_keys.get("zap_resume"):
+                        # Fallback button
                         await self.hass.services.async_call(
                             "button",
                             "press",
@@ -652,6 +661,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                             blocking=True,
                         )
                         self._add_log("Sent Resume command")
+
                     self._last_applied_state = desired_state
                 except Exception as e:
                     _LOGGER.error(f"Failed to switch Zaptec state to CHARGING: {e}")
@@ -669,6 +679,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                         blocking=True,
                     )
                     self._last_applied_amps = target_amps
+                    # Only log amp changes if actually charging (>0)
                     if target_amps > 0:
                         self._add_log(
                             f"Load Balancing: Set Zaptec limit to {target_amps}A"
@@ -705,6 +716,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                         )
                         self._add_log(f"Switched Charging state to: PAUSED")
                     elif self.conf_keys.get("zap_stop"):
+                        # Fallback button
                         await self.hass.services.async_call(
                             "button",
                             "press",
@@ -712,11 +724,13 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                             blocking=True,
                         )
                         self._add_log("Sent Stop command")
+
                     self._last_applied_state = desired_state
                 except Exception as e:
                     _LOGGER.error(f"Failed to switch Zaptec state to PAUSED: {e}")
 
     def _fetch_sensor_data(self) -> dict:
+        """Read all configured sensors from Home Assistant state machine."""
         data = {}
 
         def get_float(entity_id):
@@ -731,43 +745,64 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 return 0.0
 
         def get_state(entity_id):
-            return self.hass.states.get(entity_id) if entity_id else None
+            if not entity_id:
+                return None
+            state = self.hass.states.get(entity_id)
+            return state
 
         data["p1_l1"] = get_float(self.conf_keys["p1_l1"])
         data["p1_l2"] = get_float(self.conf_keys["p1_l2"])
         data["p1_l3"] = get_float(self.conf_keys["p1_l3"])
         data["car_soc"] = get_float(self.conf_keys["car_soc"])
+
+        # Fetch Charger Current if configured
         data["ch_l1"] = get_float(self.conf_keys.get("ch_l1"))
         data["ch_l2"] = get_float(self.conf_keys.get("ch_l2"))
         data["ch_l3"] = get_float(self.conf_keys.get("ch_l3"))
 
         plugged_state = get_state(self.conf_keys["car_plugged"])
-        data["car_plugged"] = (
-            plugged_state.state
-            in ["on", "true", "connected", "charging", "full", "plugged_in"]
-            if plugged_state
-            else False
-        )
+        # Handle state object being None safely
+        if plugged_state:
+            data["car_plugged"] = plugged_state.state in [
+                "on",
+                "true",
+                "connected",
+                "charging",
+                "full",
+                "plugged_in",
+            ]
+        else:
+            data["car_plugged"] = False
+
+        # Handle Optional Price Sensor
         price_entity = self.conf_keys.get("price")
-        data["price_data"] = (
-            self.hass.states.get(price_entity).attributes
-            if price_entity and self.hass.states.get(price_entity)
-            else {}
-        )
+        if price_entity:
+            price_state = self.hass.states.get(price_entity)
+            data["price_data"] = price_state.attributes if price_state else {}
+        else:
+            data["price_data"] = {}
+
         return data
 
     async def _handle_plugged_event(self, is_plugged: bool, data: dict):
+        """Check for plug events."""
+        # Case A: Just Plugged In -> Force SoC Update
         if is_plugged and not self.previous_plugged_state:
             self._add_log("Car plugged in.")
+
+            # Start new Session
             self.current_session = {
                 "start_time": datetime.now().isoformat(),
                 "history": [],
                 "log": [],
             }
+
+            # Sync Virtual SoC to Sensor immediately on plug-in
             if data.get("car_soc") is not None:
                 self._virtual_soc = data["car_soc"]
             else:
-                self._virtual_soc = 0.0
+                self._virtual_soc = 0.0  # Start fresh if unknown
+
             soc_entity = self.conf_keys["car_soc"]
             try:
                 await self.hass.services.async_call(
@@ -776,22 +811,35 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                     {"entity_id": soc_entity},
                     blocking=False,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                _LOGGER.warning(f"Failed to force update car sensor: {e}")
 
+        # Case B: Just Unplugged -> Reset Overrides to Standards
         if not is_plugged and self.previous_plugged_state:
             self._add_log("Car unplugged. Resetting settings.")
+
+            # Finalize Session Report
             if self.current_session:
                 self._finalize_session()
                 self.current_session = None
+
+            # Reset Override Flag
             self.manual_override_active = False
+
+            # 1. Reset Time Override (Internal update)
             std_time = data.get(ENTITY_DEPARTURE_TIME, time(7, 0))
             self.set_user_input(ENTITY_DEPARTURE_OVERRIDE, std_time, internal=True)
             data[ENTITY_DEPARTURE_OVERRIDE] = std_time
+
+            # 2. Reset Target SoC Override (Internal update)
             std_target = data.get(ENTITY_TARGET_SOC, 80)
             self.set_user_input(ENTITY_TARGET_OVERRIDE, std_target, internal=True)
             data[ENTITY_TARGET_OVERRIDE] = std_target
+
+            # Save the cleared state
             self._save_data()
+
+            # IMMEDIATE OFF: Force the switch off right now
             if self.conf_keys.get("zap_switch"):
                 try:
                     await self.hass.services.async_call(
@@ -800,8 +848,11 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                         {"entity_id": self.conf_keys["zap_switch"]},
                         blocking=True,
                     )
-                except Exception:
-                    pass
+                    self._add_log("Unplugged: Forced Zaptec Switch OFF (Paused).")
+                except Exception as e:
+                    _LOGGER.error(f"Failed to force Zaptec off: {e}")
+
+            # Force State Reset so next plug-in starts fresh logic
             self._last_applied_state = "paused"
             self._last_applied_car_limit = -1
             self._last_scheduled_end = None
@@ -809,32 +860,58 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         self.previous_plugged_state = is_plugged
 
     def _calculate_load_balancing(self, data: dict) -> float:
+        """Calculate the safe current available for the charger."""
+        # Get raw grid readings (includes house + charger)
         p1_l1 = data.get("p1_l1", 0.0)
         p1_l2 = data.get("p1_l2", 0.0)
         p1_l3 = data.get("p1_l3", 0.0)
+
+        # Get charger readings (if sensors configured)
         ch_l1 = data.get("ch_l1", 0.0)
         ch_l2 = data.get("ch_l2", 0.0)
         ch_l3 = data.get("ch_l3", 0.0)
+
+        # Calculate House Base Load (Total - Charger)
+        # We ensure it doesn't go below 0 (sensor timing issues)
         house_l1 = max(0.0, p1_l1 - ch_l1)
         house_l2 = max(0.0, p1_l2 - ch_l2)
         house_l3 = max(0.0, p1_l3 - ch_l3)
+
+        # Determine highest base load among phases
         max_house_current = max(house_l1, house_l2, house_l3)
+
+        # Calculate Remaining Capacity for EV
         buffer = max(1.0, self.max_fuse * 0.05)
-        return max(0.0, self.max_fuse - max_house_current - buffer)
+        available = self.max_fuse - max_house_current - buffer
+
+        # Ensure non-negative
+        return max(0.0, available)
 
     def _analyze_prices(self, attributes: dict) -> str:
+        """Quick status for UI."""
         raw_prices = attributes.get("today", [])
         if not raw_prices:
             return "No Data"
         try:
+            if isinstance(raw_prices, str):
+                return "Error"
+
+            # Determine interval based on count
             count = len(raw_prices)
             now_dt = datetime.now()
-            idx = (
-                (now_dt.hour * 4) + (now_dt.minute // 15) if count > 25 else now_dt.hour
-            )
+
+            # Support for 15-min intervals (96/day) vs Hourly (24/day)
+            if count > 25:
+                idx = (now_dt.hour * 4) + (now_dt.minute // 15)
+            else:
+                idx = now_dt.hour
+
+            # Safety clamp index
             idx = min(idx, count - 1)
+
             current = raw_prices[idx]
             avg = sum(raw_prices) / count
+
             if current < avg * 0.8:
                 return "Very Cheap"
             if current < avg:
@@ -846,6 +923,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
     def _get_calendar_data(
         self, data: dict, now: datetime
     ) -> tuple[datetime | None, float | None]:
+        """Check for relevant calendar event. Returns (departure_time, target_soc)."""
         events = data.get("calendar_events", [])
         if not events:
             return None, None
@@ -878,19 +956,30 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         return None, None
 
     def _get_departure_time(self, data: dict, now: datetime) -> datetime:
+        """Determine the target departure datetime."""
+        # Check Calendar First (Only if we didn't just manually override everything)
+        # But wait, logic says Calendar should set time AND maybe target.
+        # This method ONLY returns time.
+
         cal_time, _ = self._get_calendar_data(data, now)
         if cal_time:
+            # Sync the UI override time to match calendar so user sees it
+            # But only if we haven't manually touched it recently?
+            # User requirement: "if the logic finds it... have target level... and time"
             return cal_time
-        time_input = data.get(ENTITY_DEPARTURE_OVERRIDE) or data.get(
-            ENTITY_DEPARTURE_TIME, time(7, 0)
-        )
+
+        time_input = data.get(ENTITY_DEPARTURE_OVERRIDE)
+        if not time_input:
+            time_input = data.get(ENTITY_DEPARTURE_TIME, time(7, 0))
+
         dept_dt = datetime.combine(now.date(), time_input)
         if dept_dt < now:
             dept_dt = dept_dt + timedelta(days=1)
+
         return dept_dt
 
     def _generate_charging_plan(self, data: dict) -> dict:
-        """Core Logic."""
+        """Core Logic: Determine WHEN to charge and to WHAT level."""
         plan = {
             "should_charge_now": False,
             "scheduled_start": None,
@@ -898,6 +987,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             "charging_schedule": [],
             "charging_summary": "Not calculated",
         }
+
+        # Safety Check for Unplugged happens at end to allow visualization calculation if needed
+        # But we force False if unplugged anyway.
+
         if not data.get(ENTITY_SMART_SWITCH, True):
             plan["should_charge_now"] = True
             plan["charging_summary"] = "Smart charging disabled. Charging immediately."
@@ -907,21 +1000,42 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
         now = datetime.now()
         prices = []
+
+        # --- Handle Missing Price Sensor ---
+        # If no prices, we cannot optimize. Default to Charge Now (Load Balanced).
         raw_today = data["price_data"].get("today", [])
+
         if not raw_today:
+            # Check if sensor was configured at all
+            if not self.conf_keys.get("price"):
+                plan["charging_summary"] = (
+                    "Load Balancing Mode (No Price Sensor configured)."
+                )
+            else:
+                plan["charging_summary"] = (
+                    "Error: Price sensor configured but no data received."
+                )
+
+            # Default behavior: Charge Immediately
             plan["should_charge_now"] = True
-            plan["charging_summary"] = "No Price Sensor. Load Balancing Mode."
+
+            # If unplugged, force off
             if not data.get("car_plugged"):
                 plan["should_charge_now"] = False
             return plan
 
+        # --- Standard Price Parsing ---
         raw_tomorrow = data["price_data"].get("tomorrow", [])
 
         def parse_price_list(price_list, date_ref):
             parsed = []
             if not price_list:
                 return []
+
+            # Determine if 60 or 15 minute resolution based on list length
+            # 24 = Hourly, 96 = 15-Min
             interval_min = 60 if len(price_list) <= 25 else 15
+
             for i, price in enumerate(price_list):
                 start_dt = datetime.combine(date_ref, time(0, 0)) + timedelta(
                     minutes=i * interval_min
@@ -941,6 +1055,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             raw_today = [float(x) for x in raw_today.split(",")]
         if isinstance(raw_tomorrow, str):
             raw_tomorrow = [float(x) for x in raw_tomorrow.split(",")]
+
         prices.extend(parse_price_list(raw_today, now.date()))
         if data["price_data"].get("tomorrow_valid", False) or raw_tomorrow:
             prices.extend(
@@ -948,14 +1063,17 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             )
 
         if not prices:
+            # Fallback if parsing failed
             plan["should_charge_now"] = True
             plan["charging_summary"] = "No future price data found."
             if not data.get("car_plugged"):
                 plan["should_charge_now"] = False
             return plan
 
+        # 2. Define Time Window
         dept_dt = self._get_departure_time(data, now)
         calc_window = [p for p in prices if p["start"] < dept_dt]
+
         if not calc_window:
             plan["should_charge_now"] = True
             plan["charging_summary"] = "Departure passed. Charging."
@@ -963,9 +1081,13 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 plan["should_charge_now"] = False
             return plan
 
+        # Determine departure source for summary
         cal_time, cal_soc = self._get_calendar_data(data, now)
         time_source = "(Calendar)" if cal_time and cal_time == dept_dt else "(Manual)"
+
+        # 3. Determine Target SoC
         min_guaranteed = data.get(ENTITY_MIN_SOC, 20)
+        status_note = ""
 
         if self.manual_override_active:
             final_target = data.get(ENTITY_TARGET_OVERRIDE, 80)
@@ -976,11 +1098,13 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         else:
             final_target = data.get(ENTITY_TARGET_SOC, 80)
             status_note = "(Smart)"
+
             min_price_in_window = min(slot["price"] for slot in calc_window)
             limit_1 = data.get(ENTITY_PRICE_LIMIT_1, 0.5)
             target_1 = data.get(ENTITY_TARGET_SOC_1, 100)
             limit_2 = data.get(ENTITY_PRICE_LIMIT_2, 1.5)
             target_2 = data.get(ENTITY_TARGET_SOC_2, 80)
+
             if min_price_in_window <= limit_1:
                 final_target = max(final_target, target_1)
             elif min_price_in_window <= limit_2:
@@ -988,7 +1112,22 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
         final_target = max(final_target, min_guaranteed)
         plan["planned_target_soc"] = final_target
-        current_soc = data.get("car_soc", 0) or 0.0
+
+        # 4. Calculate Energy Needed
+        # Use our Virtual SoC (synced/estimated) instead of potentially stale sensor
+        # FIX: Check if car_soc is None (unavailable) first
+        current_soc = data.get("car_soc")
+        if current_soc is None or current_soc <= 0.0:
+            plan["should_charge_now"] = False
+            plan["charging_summary"] = (
+                "Waiting for valid Car SoC (Current: 0% or Unknown)."
+            )
+            if not data.get("car_plugged"):
+                plan["should_charge_now"] = False
+            return plan
+
+        # Ensure we work with float for calculations
+        current_soc = float(current_soc)
 
         selected_slots = []
         selected_start_times = set()
@@ -1010,18 +1149,22 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                     plan["should_charge_now"] = True
                     break
         else:
-            # Calculation
             soc_needed = final_target - current_soc
             kwh_needed = (soc_needed / 100.0) * self.car_capacity
             efficiency = 1.0 - (self.charger_loss / 100.0)
             kwh_to_pull = kwh_needed / efficiency
+
             est_power_kw = min((3 * 230 * self.max_fuse) / 1000, 11.0)
             hours_needed = kwh_to_pull / est_power_kw
+
+            # Dynamic slot duration calculation (supports 15-min or 60-min slots)
             slot_duration_hours = (
                 calc_window[0]["end"] - calc_window[0]["start"]
             ).seconds / 3600.0
+            # Guard against zero division if window data bad
             if slot_duration_hours <= 0:
                 slot_duration_hours = 1.0
+
             slots_needed = math.ceil(hours_needed / slot_duration_hours)
 
             sorted_window = sorted(calc_window, key=lambda x: x["price"])
@@ -1054,8 +1197,12 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
             summary_lines = []
             total_plan_cost = 0.0
+
+            # --- CALCULATE COSTS WITH FEES AND VAT ---
             extra_fee = data.get(ENTITY_PRICE_EXTRA_FEE, 0.0)
             vat_pct = data.get(ENTITY_PRICE_VAT, 0.0)
+
+            # Include text note if adjustments exist
             cost_note = ""
             if extra_fee > 0 or vat_pct > 0:
                 cost_note = "(incl fees/VAT)"
@@ -1064,19 +1211,28 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 chrono_slots = sorted(selected_slots, key=lambda x: x["start"])
                 kwh_grid_per_slot_max = est_power_kw * slot_duration_hours
                 remaining_kwh_grid = kwh_to_pull
+
                 running_soc = current_soc
                 blocks = []
                 current_block = None
 
                 for slot in chrono_slots:
-                    if remaining_kwh_grid <= 0.001:
+                    # Stop calculating if we've reached the energy target
+                    if remaining_kwh_grid <= 0.001:  # Small epsilon
                         break
+
+                    # Calculate Adjusted Price per kWh for this slot
                     raw_price = slot["price"]
                     adjusted_price = (raw_price + extra_fee) * (1 + vat_pct / 100.0)
+
+                    # Determine energy used in this slot (capped by need)
                     kwh_this_slot = min(kwh_grid_per_slot_max, remaining_kwh_grid)
                     remaining_kwh_grid -= kwh_this_slot
+
                     slot_cost = adjusted_price * kwh_this_slot
                     total_plan_cost += slot_cost
+
+                    # Calculate SoC gain for this specific energy amount
                     kwh_batt_this_slot = kwh_this_slot * efficiency
                     soc_gain_this_slot = (
                         kwh_batt_this_slot / self.car_capacity
@@ -1115,8 +1271,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 for b in blocks:
                     start_s = b["soc_start"]
                     end_s = min(100, start_s + b["soc_gain"])
+                    # Clamp end_s to final_target if it slightly exceeds due to math
                     if end_s > final_target:
                         end_s = final_target
+
                     avg_p = b["avg_price_acc"] / b["count"]
                     line = (
                         f"**{b['start'].strftime('%H:%M')} - {b['end'].strftime('%H:%M')}**\n"
@@ -1159,6 +1317,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
         if not data.get("car_plugged"):
             plan["should_charge_now"] = False
+
         return plan
 
     def _generate_report_image(self, report: dict, file_path: str):
