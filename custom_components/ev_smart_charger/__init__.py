@@ -38,14 +38,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Listen for options updates
     entry.async_on_unload(entry.add_update_listener(update_listener))
 
-    # Register Service
+    # Register Services
     async def handle_generate_report(call: ServiceCall):
-        """Handle the service call."""
+        """Handle the report generation service."""
         await coordinator.async_trigger_report_generation()
+
+    async def handle_generate_plan(call: ServiceCall):
+        """Handle the plan image generation service."""
+        await coordinator.async_trigger_plan_image_generation()
 
     hass.services.async_register(
         DOMAIN, "generate_report_image", handle_generate_report
     )
+    hass.services.async_register(DOMAIN, "generate_plan_image", handle_generate_plan)
 
     return True
 

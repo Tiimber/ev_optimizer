@@ -4,3 +4,9 @@ generate_report_image:
     Manually triggers the generation of the thermal printer image. 
     If a charging session is currently active, it generates a snapshot of the current session.
     If no session is active, it regenerates the report for the last finished session.
+
+generate_plan_image:
+  name: Generate Plan Image
+  description: >
+    Generates a thermal printer image of the current future charging plan, 
+    including price graph and scheduled charging times.
