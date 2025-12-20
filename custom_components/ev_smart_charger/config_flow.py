@@ -213,12 +213,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_CAR_REFRESH_ACTION,
                     default=defaults.get(CONF_CAR_REFRESH_ACTION),
                 ): TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT)),
+                # Added translation_key here to link to strings.json
                 vol.Optional(
                     CONF_CAR_REFRESH_INTERVAL,
                     default=defaults.get(CONF_CAR_REFRESH_INTERVAL, REFRESH_NEVER),
                 ): SelectSelector(
                     SelectSelectorConfig(
-                        options=refresh_options, mode=SelectSelectorMode.DROPDOWN
+                        options=refresh_options,
+                        mode=SelectSelectorMode.DROPDOWN,
+                        translation_key="car_refresh_interval",
                     )
                 ),
             }
