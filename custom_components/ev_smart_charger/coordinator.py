@@ -484,31 +484,46 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         from PIL import ImageFont
 
         # Paths to try for TrueType fonts
-        font_paths = [
-            "DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            "arial.ttf",
+        font_candidates = [
+            # Path, Size adjustment
+            ("DejaVuSans-Bold.ttf", 0),
+            ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 0),
+            ("/usr/share/fonts/ttf-dejavu/DejaVuSans-Bold.ttf", 0),  # Alpine default
+            ("arial.ttf", 0),
         ]
 
         font_header = None
         font_text = None
         font_small = None
 
-        # Try to load fonts
-        for path in font_paths:
-            try:
-                # Header Font (Bold 40)
-                font_header = ImageFont.truetype(path, 40)
+        # Desired Sizes (Bigger)
+        s_header = 40
+        s_text = 30
+        s_small = 24
 
-                # Text Font (Regular 30 - use matching regular if possible, simplified here)
+        for path, _ in font_candidates:
+            try:
+                font_header = ImageFont.truetype(path, s_header)
+
+                # Guess regular path
                 reg_path = path.replace("-Bold", "")
-                font_text = ImageFont.truetype(reg_path, 30)
-                font_small = ImageFont.truetype(reg_path, 24)
+                if reg_path == path:
+                    reg_path = path.replace("Bold", "")
+                if reg_path == path:
+                    reg_path = path  # Fallback to same
+
+                try:
+                    font_text = ImageFont.truetype(reg_path, s_text)
+                    font_small = ImageFont.truetype(reg_path, s_small)
+                except OSError:
+                    font_text = ImageFont.truetype(path, s_text)
+                    font_small = ImageFont.truetype(path, s_small)
+
+                _LOGGER.debug(f"Loaded fonts from {path}")
                 break
             except OSError:
                 continue
 
-        # Fallback to default if no TTF found
         if not font_header:
             _LOGGER.warning(
                 "Could not load TrueType fonts. Using Pillow default (tiny)."
@@ -527,14 +542,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             _LOGGER.warning("PIL (Pillow) not found. Cannot generate image.")
             return
 
-        # Setup Canvas
         width = 576
         bg_color = "white"
-
-        # Load Fonts via Helper
         font_header, font_text, font_small = self._load_fonts()
 
-        # Calculate Text Summary Section Height
         history = report.get("graph_data", [])
         charging_blocks = []
         if history:
@@ -556,14 +567,13 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             if current_block:
                 charging_blocks.append(current_block)
 
-        # Increased text section base height substantially for larger fonts
+        # Calculate Height based on content + font size
         text_section_height = 600 + (len(charging_blocks) * 60)
         height = text_section_height + 450
 
         img = Image.new("RGB", (width, height), bg_color)
         draw = ImageDraw.Draw(img)
 
-        # --- DRAW TEXT HEADER ---
         y = 30
         draw.text(
             (width // 2, y),
@@ -590,7 +600,6 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         draw.line([(10, y), (width - 10, y)], fill="black", width=3)
         y += 30
 
-        # --- DRAW CHARGING LOG ---
         if charging_blocks:
             draw.text((30, y), "Charging Activity:", font=font_text, fill="black")
             y += 50
@@ -606,14 +615,12 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             draw.text((30, y), "No charging recorded.", font=font_text, fill="black")
             y += 40
 
-        y += 40  # Spacing before graph
+        y += 40
 
-        # --- DRAW GRAPH ---
         if history:
             graph_top = y
             graph_height = 300
             graph_bottom = graph_top + graph_height
-
             margin_left = 60
             margin_right = 60
             graph_draw_width = width - margin_left - margin_right
@@ -633,8 +640,6 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             for i, point in enumerate(history):
                 x0 = margin_left + (i * bar_w_float)
                 x1 = margin_left + ((i + 1) * bar_w_float)
-
-                # Price Bar (Gray)
                 p_norm = (point["price"] - axis_min_p) / price_range
                 p_h = p_norm * graph_height
                 draw.rectangle(
@@ -642,6 +647,14 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                     fill="#e0e0e0",
                     outline=None,
                 )
+
+                # Active Charging Indicator
+                if point["charging"] == 1:
+                    draw.rectangle(
+                        [x0, graph_bottom - 20, x1, graph_bottom],
+                        fill="black",
+                        outline=None,
+                    )
 
             # Left Axis (Price)
             draw.line(
@@ -702,7 +715,6 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 soc_norm = point["soc"] / 100.0
                 y = graph_bottom - (soc_norm * graph_height)
                 points.append((x, y))
-
             if len(points) > 1:
                 draw.line(points, fill="black", width=3)
 
@@ -737,7 +749,6 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             except Exception:
                 pass
 
-        # Save
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         img.save(file_path)
         _LOGGER.info(f"Saved session image to {file_path}")
@@ -752,15 +763,12 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
         width = 576
         bg_color = "white"
-
-        # Load Fonts
         font_header, font_text, font_small = self._load_fonts()
 
         schedule = data.get("charging_schedule", [])
         if not schedule:
             return
 
-        # Filter for valid slots (exclude closing None price)
         valid_slots = [s for s in schedule if s["price"] is not None]
         if not valid_slots:
             return
@@ -864,7 +872,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             )
             label = f"{curr_mark:.1f}"
             draw.text(
-                (margin_left - 55, mark_y - 15), label, font=font_small, fill="black"
+                (margin_left - 55, mark_y - 10), label, font=font_small, fill="black"
             )
             curr_mark += 0.5
 
@@ -1324,6 +1332,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
         if not prices:
             plan["should_charge_now"] = True
+            plan["charging_summary"] = "No future price data found."
             if not data.get("car_plugged"):
                 plan["should_charge_now"] = False
             return plan
@@ -1490,8 +1499,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 for b in blocks:
                     start_s = b["soc_start"]
                     end_s = min(100, start_s + b["soc_gain"])
+                    # Clamp end_s to final_target if it slightly exceeds due to math
                     if end_s > final_target:
                         end_s = final_target
+
                     avg_p = b["avg_price_acc"] / b["count"]
                     line = (
                         f"**{b['start'].strftime('%H:%M')} - {b['end'].strftime('%H:%M')}**\n"
