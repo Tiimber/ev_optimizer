@@ -626,9 +626,20 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             if current_block:
                 charging_blocks.append(current_block)
 
-        # Increased text section base height substantially for larger fonts
-        text_section_height = 600 + (len(charging_blocks) * 35)
-        height = text_section_height + 400
+        # FIX: Tighter height calculation to remove excessive whitespace
+        # Header (110) + Info (180) + Divider (20) + LogHeader (40) = ~350 base
+        # Blocks: N * 35
+        # Graph area (Graph 250 + Labels 15 + Pad 20) = ~285
+        # Pre-graph gap = 40
+        # Total = 350 + N*35 + 40 + 285 = 675 + N*35
+
+        base_height = 360  # Header + Info section
+        log_height = (
+            (len(charging_blocks) * 40) if charging_blocks else 40
+        )  # Log lines or "No charging" message
+        graph_area_height = 330  # Gap + Graph + Labels
+
+        height = base_height + log_height + graph_area_height
 
         img = Image.new("RGB", (width, height), bg_color)
         draw = ImageDraw.Draw(img)
@@ -642,7 +653,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             fill="black",
             anchor="mt",
         )
-        y += 60
+        y += 70
 
         lines = [
             f"Start: {report['start_time'][:16].replace('T', ' ')}",
@@ -656,9 +667,9 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             draw.text((30, y), line, font=font_text, fill="black")
             y += 35
 
-        y += 15
+        y += 10
         draw.line([(10, y), (width - 10, y)], fill="black", width=3)
-        y += 30
+        y += 20
 
         # --- DRAW CHARGING LOG ---
         if charging_blocks:
@@ -671,12 +682,12 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 end_str = end_dt.strftime("%H:%M")
                 line = f"- {start_str} to {end_str} ({int(block['soc_start'])}% -> {int(block['soc_end'])}%)"
                 draw.text((40, y), line, font=font_small, fill="black")
-                y += 30
+                y += 40
         else:
             draw.text((30, y), "No charging recorded.", font=font_text, fill="black")
             y += 40
 
-        y += 30  # Spacing before graph
+        y += 20  # Spacing before graph
 
         # --- DRAW GRAPH ---
         if history:
@@ -786,7 +797,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 start_dt = datetime.fromisoformat(history[0]["time"])
                 start_str = start_dt.strftime("%H:%M")
                 draw.text(
-                    (margin_left, graph_bottom + 15),
+                    (margin_left, graph_bottom + 5),
                     start_str,
                     font=font_small,
                     fill="black",
@@ -797,14 +808,14 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 try:
                     w = draw.textlength(end_str, font=font_small)
                     draw.text(
-                        (width - margin_right - w, graph_bottom + 15),
+                        (width - margin_right - w, graph_bottom + 5),
                         end_str,
                         font=font_small,
                         fill="black",
                     )
                 except AttributeError:
                     draw.text(
-                        (width - margin_right - 60, graph_bottom + 15),
+                        (width - margin_right - 50, graph_bottom + 5),
                         end_str,
                         font=font_small,
                         fill="black",
@@ -864,6 +875,8 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
         start_time = valid_slots[0]["start"]
         end_time = valid_slots[-1]["end"]
+        start_dt = datetime.fromisoformat(start_time)
+        end_dt = datetime.fromisoformat(end_time)
 
         current_soc = data.get("car_soc", 0)
         target_soc = data.get("planned_target_soc", 0)
@@ -874,8 +887,12 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         else:
             soc_line = f"SoC:   {int(current_soc)}% -> {int(target_soc)}%"
 
+        # Format: DD/MM HH:MM
+        s_fmt = start_dt.strftime("%d/%m %H:%M")
+        e_fmt = end_dt.strftime("%d/%m %H:%M")
+
         lines = [
-            f"Plan:  {start_time[11:16]} -> {end_time[11:16]}",
+            f"Plan:  {s_fmt} -> {e_fmt}",
             soc_line,
             f"Est Cost: {cost_str}",
             f"State: {data.get('current_price_status', 'Unknown')}",
@@ -948,8 +965,6 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             curr_mark += 0.5
 
         # X-Axis Labels
-        start_dt = datetime.fromisoformat(start_time)
-        end_dt = datetime.fromisoformat(end_time)
         draw.text(
             (margin_left, graph_bottom + 15),
             start_dt.strftime("%H:%M"),
@@ -1570,8 +1585,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 for b in blocks:
                     start_s = b["soc_start"]
                     end_s = min(100, start_s + b["soc_gain"])
+                    # Clamp end_s to final_target if it slightly exceeds due to math
                     if end_s > final_target:
                         end_s = final_target
+
                     avg_p = b["avg_price_acc"] / b["count"]
                     line = (
                         f"**{b['start'].strftime('%H:%M')} - {b['end'].strftime('%H:%M')}**\n"
