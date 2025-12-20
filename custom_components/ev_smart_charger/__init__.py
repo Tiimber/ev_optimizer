@@ -17,6 +17,7 @@ PLATFORMS: list[Platform] = [
     Platform.SWITCH,
     Platform.BUTTON,
     Platform.TIME,
+    Platform.CAMERA,  # Added Camera
 ]
 
 
