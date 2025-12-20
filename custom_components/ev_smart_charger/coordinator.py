@@ -483,8 +483,14 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         """Helper to load standard fonts with fallbacks."""
         from PIL import ImageFont
 
+        # Get component directory for bundled fonts
+        component_dir = os.path.dirname(__file__)
+
         # Paths to try for TrueType fonts
         font_candidates = [
+            # 1. Bundled Font (Best for Nabu Casa / Docker)
+            os.path.join(component_dir, "DejaVuSans.ttf"),
+            # 2. System Paths
             "DejaVuSans-Bold.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
             "/usr/share/fonts/ttf-dejavu/DejaVuSans-Bold.ttf",  # Alpine default
@@ -513,7 +519,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             if os.path.exists(path):
                 found_path = path
                 break
-            # Also try checking via PIL if name is resolved
+            # Also try checking via PIL if name is resolved (for system fonts not using full path)
             try:
                 ImageFont.truetype(path, s_header)
                 found_path = path
@@ -968,53 +974,36 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         sensor_soc = data.get("car_soc")
 
         # 1. Sync Logic
-        # Sync ONLY if sensor reports a HIGHER value than our estimate (it updated).
-        # OR if we are uninitialized (0.0).
         if sensor_soc is not None:
             if sensor_soc > self._virtual_soc or self._virtual_soc == 0.0:
                 self._virtual_soc = float(sensor_soc)
 
         # 2. Estimate Logic
-        # Only estimate if we are ACTIVELY charging
         if self._last_applied_state == "charging":
-            # Use Real Charger Current if available (More accurate than Target Amps)
             ch_l1 = data.get("ch_l1", 0.0)
             ch_l2 = data.get("ch_l2", 0.0)
             ch_l3 = data.get("ch_l3", 0.0)
             measured_amps = max(ch_l1, ch_l2, ch_l3)
 
-            # Fallback to Target Amps if no sensor or sensor reads 0 while active
             used_amps = (
                 measured_amps if measured_amps > 0.5 else self._last_applied_amps
             )
 
             if used_amps > 0:
-                # Calculate time delta in hours
                 seconds_passed = (current_time - self._last_update_time).total_seconds()
                 hours_passed = seconds_passed / 3600.0
-
-                # Estimate Power (3-phase 230V standard)
-                # P (kW) = 3 * 230V * Amps / 1000
                 estimated_power_kw = (3 * 230 * used_amps) / 1000.0
-
-                # Efficiency Factor
                 efficiency_pct = self.entry.data.get(CONF_CHARGER_LOSS, 10.0)
                 efficiency_factor = 1.0 - (efficiency_pct / 100.0)
-
-                # Energy to Battery
                 added_kwh = estimated_power_kw * hours_passed * efficiency_factor
 
-                # Convert to % SoC
                 if self.car_capacity > 0:
                     added_percent = (added_kwh / self.car_capacity) * 100.0
                     self._virtual_soc += added_percent
 
-                    # Cap at Physical Car Limit (if we know it)
                     if self._last_applied_car_limit > 0:
                         if self._virtual_soc > self._last_applied_car_limit:
                             self._virtual_soc = float(self._last_applied_car_limit)
-
-                    # Absolute Cap at 100
                     if self._virtual_soc > 100.0:
                         self._virtual_soc = 100.0
 
@@ -1023,11 +1012,9 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
     async def _apply_charger_control(self, data: dict, plan: dict):
         """Send commands to the Zaptec entities and Car."""
 
-        # 0. Startup Grace Period Check
         if datetime.now() - self._startup_time < timedelta(minutes=2):
             return
 
-        # 1. Determine Desired State
         should_charge = data.get("should_charge_now", False)
         safe_amps = math.floor(data.get("max_available_current", 0))
 
@@ -1038,17 +1025,14 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 )
             should_charge = False
 
-        # Determine Target Amps based on State
         target_amps = safe_amps if should_charge else 0
         desired_state = "charging" if should_charge else "paused"
 
-        # --- MAINTENANCE MODE / PAUSED OVERRIDE ---
         maintenance_active = "Maintenance mode active" in plan.get(
             "charging_summary", ""
         )
 
         if maintenance_active:
-            # FORCE: Switch ON, Amps 0
             should_charge = True
             target_amps = 0
             desired_state = "maintenance"
