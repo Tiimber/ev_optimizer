@@ -2,6 +2,7 @@
 
 import logging
 import math
+import re
 import os
 from datetime import datetime
 
@@ -56,6 +57,29 @@ def _load_fonts():
             break
         except OSError:
             continue
+
+    # Fallback search
+    if not found_path:
+        search_dirs = [
+            "/usr/share/fonts",
+            "/usr/local/share/fonts",
+            "/root/.local/share/fonts",
+        ]
+        for search_dir in search_dirs:
+            if not os.path.isdir(search_dir):
+                continue
+            for root, _, files in os.walk(search_dir):
+                for file in files:
+                    if file.lower().endswith(".ttf"):
+                        if "bold" in file.lower() and "sans" in file.lower():
+                            found_path = os.path.join(root, file)
+                            break
+                        if "bold" in file.lower() and not found_path:
+                            found_path = os.path.join(root, file)
+                if found_path:
+                    break
+            if found_path:
+                break
 
     if found_path:
         try:
@@ -314,7 +338,6 @@ def generate_plan_image(data: dict, file_path: str):
     end_time = valid_slots[-1]["end"]
     start_dt = datetime.fromisoformat(start_time)
     end_dt = datetime.fromisoformat(end_time)
-
     current_soc = data.get("car_soc", 0)
     target_soc = data.get("planned_target_soc", 0)
 
