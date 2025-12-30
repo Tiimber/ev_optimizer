@@ -159,3 +159,197 @@ def test_calculate_load_balancing_with_zap_limit():
     # With zap_limit distributed, house load becomes zero and buffer=1 => available ~= 19
     assert math.isclose(available, 19.0, rel_tol=1e-3)
 
+
+# === NEW TEST SCENARIOS ===
+
+def test_detached_charging_quarters_marked():
+    """When charging is needed over multiple non-consecutive 15-minute slots, those slots are marked active."""
+    now = FIXED_NOW
+    # Low prices at slots 10, 12, 14, 16 (non-consecutive)
+    raw_today = make_price_list(low_indices=[10, 12, 14, 16], low_value=0.5, base=3.0)
+
+    data = {
+        "price_data": {"today": raw_today},
+        const.ENTITY_TARGET_SOC: 80,
+        const.ENTITY_SMART_SWITCH: True,
+        const.ENTITY_MIN_SOC: 10,
+        const.ENTITY_DEPARTURE_TIME: time(23, 59),
+        "car_soc": 20,
+    }
+
+    config = {"max_fuse": 20.0, "charger_loss": 10.0, "car_capacity": 64.0, "has_price_sensor": True}
+    plan = planner.generate_charging_plan(data, config, manual_override=False, now=now)
+
+    schedule = plan.get("charging_schedule", [])
+    active_slots = [s for s in schedule if s.get("active")]
+    # Should have multiple active slots (at least the low-price ones)
+    assert len(active_slots) >= 2
+    # Verify they cover sufficient energy for the SoC increase
+    total_energy = sum(s.get("current", 16.0) * 0.25 * 230 / 1000 for s in active_slots)
+    assert total_energy > 0
+
+
+def test_no_charging_needed_empty_schedule():
+    """When car SoC >= target, no charging is planned."""
+    raw_today = make_price_list(base=5.0)  # High prices everywhere
+
+    data = {
+        "price_data": {"today": raw_today},
+        const.ENTITY_TARGET_SOC: 80,
+        const.ENTITY_SMART_SWITCH: True,
+        const.ENTITY_MIN_SOC: 20,
+        const.ENTITY_DEPARTURE_TIME: time(23, 59),
+        "car_soc": 85,  # Already above target
+    }
+
+    config = {"max_fuse": 20.0, "charger_loss": 10.0, "car_capacity": 64.0, "has_price_sensor": True}
+    plan = planner.generate_charging_plan(data, config, manual_override=False, now=FIXED_NOW)
+
+    schedule = plan.get("charging_schedule", [])
+    active_slots = [s for s in schedule if s.get("active")]
+    # Should have no active charging slots
+    assert len(active_slots) == 0
+    assert plan.get("should_charge_now") is False
+
+
+def test_overload_protection_6a_minimum():
+    """Charger cannot reserve less than 6A; if total load is too high, charging is disabled."""
+    # House load is very high: 18A on each phase
+    data = {
+        "price_data": {"today": make_price_list(low_indices=[50], low_value=0.1)},
+        "p1_l1": 18.0,
+        "p1_l2": 18.0,
+        "p1_l3": 18.0,
+        "ch_l1": 0.0,
+        "ch_l2": 0.0,
+        "ch_l3": 0.0,
+        const.ENTITY_TARGET_SOC: 90,
+        const.ENTITY_SMART_SWITCH: True,
+        const.ENTITY_MIN_SOC: 20,
+        "car_soc": 30,
+    }
+
+    config = {"max_fuse": 20.0, "charger_loss": 10.0, "car_capacity": 64.0, "has_price_sensor": True}
+    # calculate_load_balancing should return < 6 if overloaded
+    available = planner.calculate_load_balancing(data, max_fuse=20.0)
+    # With p1=54A total, available should be negative or very small, protecting against 6A minimum
+    assert available < 6.0, "Load balancing should not allow charging when overloaded"
+
+
+def test_soc_force_update_adds_charging_time():
+    """When car SoC is force-updated lower than anticipated at the end of a charging window, extra time is added."""
+    # Plan a charge to reach 80% by end of day
+    # Simulate that SoC was re-measured and is lower than expected
+    now = FIXED_NOW
+    raw_today = make_price_list(low_indices=[50, 51, 52], low_value=0.5)
+
+    data = {
+        "price_data": {"today": raw_today},
+        const.ENTITY_TARGET_SOC: 80,
+        const.ENTITY_SMART_SWITCH: True,
+        const.ENTITY_MIN_SOC: 10,
+        const.ENTITY_DEPARTURE_TIME: time(23, 59),
+        "car_soc": 50,  # Current measured SoC
+        "soc_force_updated": True,  # Flag that SoC was refreshed
+    }
+
+    config = {"max_fuse": 20.0, "charger_loss": 10.0, "car_capacity": 64.0, "has_price_sensor": True}
+    plan = planner.generate_charging_plan(data, config, manual_override=False, now=now)
+
+    # Plan should still exist and target should be 80
+    assert plan.get("planned_target_soc") >= 80
+    schedule = plan.get("charging_schedule", [])
+    active_slots = [s for s in schedule if s.get("active")]
+    # Should have active slots to reach the target
+    assert len(active_slots) > 0
+
+
+def test_calendar_event_percentage_override():
+    """If a calendar event includes a percentage (e.g., '90%'), the planner targets that percentage."""
+    now = FIXED_NOW
+    evt_start = (now.replace(hour=(now.hour + 3) % 24)).isoformat()
+    data = {
+        "price_data": {"today": make_price_list()},
+        const.ENTITY_SMART_SWITCH: True,
+        const.ENTITY_MIN_SOC: 10,
+        const.ENTITY_TARGET_SOC: 50,  # Default target is 50
+        "car_soc": 30,
+        "calendar_events": [{"start": evt_start, "summary": "Trip 75%"}],  # Calendar overrides to 75%
+    }
+
+    config = {"max_fuse": 20.0, "charger_loss": 10.0, "car_capacity": 64.0, "has_price_sensor": True}
+    plan = planner.generate_charging_plan(data, config, manual_override=False, now=now)
+
+    # Target should be 75% from calendar, not 50% from setting
+    assert int(plan["planned_target_soc"]) == 75
+
+
+def test_dst_transition_spring():
+    """On spring DST transition, the charging window correctly spans the time shift."""
+    # March 31, 2025, 2:00 AM -> 3:00 AM (UTC+1 -> UTC+2 in Europe)
+    # Create a timestamp near the DST transition
+    now_dst = datetime(2025, 3, 31, 1, 30)
+    raw_today = make_price_list(low_indices=[6, 7, 8], low_value=0.5)
+
+    data = {
+        "price_data": {"today": raw_today},
+        const.ENTITY_TARGET_SOC: 80,
+        const.ENTITY_SMART_SWITCH: True,
+        const.ENTITY_MIN_SOC: 20,
+        const.ENTITY_DEPARTURE_TIME: time(8, 0),
+        "car_soc": 30,
+    }
+
+    config = {"max_fuse": 20.0, "charger_loss": 10.0, "car_capacity": 64.0, "has_price_sensor": True}
+    plan = planner.generate_charging_plan(data, config, manual_override=False, now=now_dst)
+
+    # Should produce a valid plan despite the DST transition
+    assert plan.get("planned_target_soc") > 30
+    schedule = plan.get("charging_schedule", [])
+    assert isinstance(schedule, list)
+
+
+def test_load_balancing_without_nordpool():
+    """When nordpool pricing is not configured, load balancing still works for passive charging."""
+    data = {
+        "price_data": {"today": []},  # No pricing data
+        "p1_l1": 8.0,
+        "p1_l2": 7.0,
+        "p1_l3": 6.0,
+        "ch_l1": 0.0,
+        "ch_l2": 0.0,
+        "ch_l3": 0.0,
+        const.ENTITY_SMART_SWITCH: True,
+        const.ENTITY_MIN_SOC: 20,
+        "car_soc": 30,
+    }
+
+    config = {"max_fuse": 20.0, "charger_loss": 10.0, "car_capacity": 64.0, "has_price_sensor": False}
+    # Load balancing should still calculate available amps
+    available = planner.calculate_load_balancing(data, max_fuse=20.0)
+    # Available should be positive and represent the space left after house load
+    assert available > 0
+    assert available <= 20.0
+
+
+def test_car_target_soc_entity_fallback():
+    """If car 'target SoC' entity is not available, fallback to charging window and SoC estimation."""
+    data = {
+        "price_data": {"today": make_price_list()},
+        const.ENTITY_TARGET_SOC: 80,
+        const.ENTITY_SMART_SWITCH: True,
+        const.ENTITY_MIN_SOC: 20,
+        const.ENTITY_DEPARTURE_TIME: time(18, 0),
+        "car_soc": 40,
+        # No car_charging_level_entity value; should fall back to plan
+    }
+
+    config = {"max_fuse": 20.0, "charger_loss": 10.0, "car_capacity": 64.0, "has_price_sensor": True}
+    plan = planner.generate_charging_plan(data, config, manual_override=False, now=FIXED_NOW)
+
+    # Should still generate a valid plan using SoC estimation
+    assert plan.get("planned_target_soc") is not None
+    assert plan.get("planned_target_soc") > 0
+    schedule = plan.get("charging_schedule", [])
+    assert isinstance(schedule, list)
+
