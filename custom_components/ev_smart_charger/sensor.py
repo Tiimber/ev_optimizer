@@ -56,7 +56,8 @@ class EVSmartChargerStatusSensor(EVSmartChargerBaseSensor):
             "car_soc": data.get("car_soc"),
             "plugged": data.get("car_plugged"),
             "target_soc": data.get("planned_target_soc"),
-            "action_log": data.get("action_log", [])
+            "action_log": data.get("action_log", []),
+            "latency_ms": data.get("latency_ms"),
         }
 
 class EVMaxAvailableCurrentSensor(EVSmartChargerBaseSensor):
