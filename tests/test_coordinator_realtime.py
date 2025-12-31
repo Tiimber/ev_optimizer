@@ -68,7 +68,7 @@ def test_listeners_setup_and_shutdown(pkg_loader, mock_hass):
         mock_unsub = mock_track.return_value
         coordinator.async_shutdown()
         mock_unsub.assert_called_once()
-        assert len(coordinator._listeners) == 0
+        assert len(coordinator._safety_listeners) == 0
 
 def test_update_callback_triggers_refresh(pkg_loader, mock_hass):
     const = pkg_loader("const")
