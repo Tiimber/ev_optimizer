@@ -231,8 +231,8 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         """Trigger the actual refresh."""
         self._debounce_unsub = None
         self._last_p1_update = datetime.now()
-        # Request refresh (this is async and safe)
-        self.async_request_refresh()
+        # Request refresh (schedule it since we can't await in a callback)
+        self.hass.async_create_task(self.async_request_refresh())
 
     def _add_log(self, message: str):
         """Add an entry to the action log."""
