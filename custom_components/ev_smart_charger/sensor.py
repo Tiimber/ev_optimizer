@@ -125,7 +125,7 @@ class EVSmartChargerLastSessionSensor(EVSmartChargerBaseSensor):
     @property
     def state(self):
         """Return the timestamp of the last session end."""
-        report = self.coordinator.last_session_data
+        report = self.coordinator.session_manager.last_session_data
         if report:
             return report.get("end_time")
         return "No Data"
@@ -133,7 +133,7 @@ class EVSmartChargerLastSessionSensor(EVSmartChargerBaseSensor):
     @property
     def extra_state_attributes(self):
         """Return the full report data."""
-        report = self.coordinator.last_session_data
+        report = self.coordinator.session_manager.last_session_data
         if not report:
             return {}
             
