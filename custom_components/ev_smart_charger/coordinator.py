@@ -119,7 +119,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         self.manual_override_active = False
 
         # Real-time Safety Listeners
-        self._listeners = []
+        self._safety_listeners = []
         self._debounce_unsub = None
         self._last_p1_update = datetime.min
 
@@ -189,7 +189,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
         if p1_sensors:
             _LOGGER.debug(f"Setting up real-time safety listeners for: {p1_sensors}")
-            self._listeners.append(
+            self._safety_listeners.append(
                 async_track_state_change_event(
                     self.hass, p1_sensors, self._async_p1_update_callback
                 )
@@ -197,9 +197,9 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
     def async_shutdown(self):
         """Cancel listeners and timers to clean up."""
-        for unsub in self._listeners:
+        for unsub in self._safety_listeners:
             unsub()
-        self._listeners = []
+        self._safety_listeners = []
 
         if self._debounce_unsub:
             self._debounce_unsub()
