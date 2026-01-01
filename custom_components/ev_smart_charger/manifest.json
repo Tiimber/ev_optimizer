@@ -1,13 +1,13 @@
 {
-  "domain": "ev_smart_charger",
-  "name": "EV Smart Charger and Load Balancer",
   "codeowners": ["@Tiimber"],
   "config_flow": true,
+  "dependencies": [],
   "documentation": "https://github.com/Tiimber/ev_smart_charger",
-  "issue_tracker": "https://github.com/Tiimber/ev_smart_charger/issues",
+  "domain": "ev_smart_charger",
   "integration_type": "service",
   "iot_class": "local_polling",
-  "version": "1.0.0",
+  "issue_tracker": "https://github.com/Tiimber/ev_smart_charger/issues",
+  "name": "EV Smart Charger and Load Balancer",
   "requirements": [],
-  "dependencies": []
+  "version": "1.0.0"
 }
