@@ -4,8 +4,10 @@
   "codeowners": ["@Tiimber"],
   "config_flow": true,
   "documentation": "https://github.com/Tiimber/ev_smart_charger",
+  "issue_tracker": "https://github.com/Tiimber/ev_smart_charger/issues",
+  "integration_type": "service",
   "iot_class": "local_polling",
   "version": "1.0.0",
   "requirements": [],
-  "dependencies": ["sensor", "number", "switch", "button", "time", "calendar"]
+  "dependencies": []
 }
