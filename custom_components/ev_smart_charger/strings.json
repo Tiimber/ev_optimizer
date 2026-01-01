@@ -100,6 +100,12 @@
       "charger": {
         "title": "Charger Settings",
         "description": "Update Zaptec charger entities.",
+        "data": {
+          "zaptec_current_limiter": "Current Limiter",
+          "zaptec_switch": "Charging Switch",
+          "zaptec_resume_button": "Resume Button",
+          "zaptec_stop_button": "Stop Button"
+        },
         "data_description": {
           "zaptec_current_limiter": "The entity that controls the maximum charging current (Amps).",
           "zaptec_switch": "The main On/Off switch for the charger (Recommended). If set, buttons are ignored.",
@@ -110,6 +116,16 @@
       "car": {
         "title": "Car Settings",
         "description": "Update Car sensors and limits.",
+        "data": {
+          "car_soc_sensor": "Car Battery % (SoC)",
+          "car_plugged_sensor": "Plugged In Sensor",
+          "car_capacity": "Battery Size (kWh)",
+          "car_charging_level_entity": "Option A: Limit Number Entity",
+          "car_entity_id": "Vehicle Entity / Device",
+          "car_limit_service": "Service: Set Charge Limit",
+          "car_refresh_action": "Service: Force Refresh",
+          "car_refresh_interval": "Refresh Frequency"
+        },
         "data_description": {
           "car_soc_sensor": "Sensor indicating the current battery percentage of the car.",
           "car_plugged_sensor": "Binary sensor indicating if the charging cable is connected.",
@@ -124,6 +140,15 @@
       "meter": {
         "title": "Meter Settings",
         "description": "Update P1 meter and fuse settings.",
+        "data": {
+          "p1_l1_sensor": "House Current L1",
+          "p1_l2_sensor": "House Current L2",
+          "p1_l3_sensor": "House Current L3",
+          "charger_current_l1": "Charger Current L1",
+          "charger_current_l2": "Charger Current L2",
+          "charger_current_l3": "Charger Current L3",
+          "max_fuse": "Main Fuse Size"
+        },
         "data_description": {
           "p1_l1_sensor": "Real-time current (Amps) on Phase 1 from your main meter.",
           "p1_l2_sensor": "Real-time current (Amps) on Phase 2 from your main meter.",
@@ -137,6 +162,12 @@
       "price_calendar": {
         "title": "Price & Planning",
         "description": "Update Price, Calendar, and General settings.",
+        "data": {
+          "price_sensor": "Nordpool Price Sensor",
+          "calendar_entity": "Planning Calendar",
+          "charger_loss": "Charger Efficiency Loss",
+          "currency": "Currency"
+        },
         "data_description": {
           "price_sensor": "Optional: Nordpool sensor for spot prices. If empty, runs in simple Load Balancing mode.",
           "calendar_entity": "Optional: Local Calendar to read for departure times and target SoC (e.g. 'Trip 90%').",
