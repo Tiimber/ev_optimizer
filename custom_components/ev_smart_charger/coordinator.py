@@ -564,21 +564,28 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
         should_charge = data.get("should_charge_now", False)
         safe_amps = math.floor(data.get("max_available_current", 0))
-        if safe_amps < 6:
-            if should_charge:
-                self._add_log(
-                    f"Safety Cutoff: Available {safe_amps}A is below minimum 6A. Pausing."
-                )
-                # Track minutes lost to overload prevention (30 second update interval)
-                self.session_manager.add_overload_minutes(0.5)
-            should_charge = False
 
-        target_amps = safe_amps if should_charge else 0
-        desired_state = "charging" if should_charge else "paused"
+        maintenance_now = (
+            "Maintenance mode active" in plan.get("charging_summary", "") and should_charge
+        )
 
-        if "Maintenance mode active" in plan.get("charging_summary", "") and should_charge:
+        # Maintenance mode is intentionally 0A, so it must not be blocked by the
+        # minimum 6A safety cutoff and must not count as overload prevention.
+        if maintenance_now:
             target_amps = 0
             desired_state = "maintenance"
+        else:
+            if safe_amps < 6:
+                if should_charge:
+                    self._add_log(
+                        f"Safety Cutoff: Available {safe_amps}A is below minimum 6A. Pausing."
+                    )
+                    # Track minutes lost to overload prevention (30 second update interval)
+                    self.session_manager.add_overload_minutes(0.5)
+                should_charge = False
+
+            target_amps = safe_amps if should_charge else 0
+            desired_state = "charging" if should_charge else "paused"
 
         target_soc = int(plan.get("planned_target_soc", 80))
         is_starting = (
@@ -615,9 +622,14 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                     _LOGGER.error(f"Car Limit Service Failed: {e}")
 
         if should_charge:
-            # Mark that we charged in this interval
-            self.session_manager.mark_charging_in_interval()
-            if self._last_applied_state != "charging" or self._last_applied_amps != target_amps:
+            # Mark that we charged in this interval (only if we actually drew current)
+            if target_amps > 0:
+                self.session_manager.mark_charging_in_interval()
+
+            if (
+                desired_state != self._last_applied_state
+                or target_amps != self._last_applied_amps
+            ):
                 self._add_log(f"Setting charger to {target_amps}A")
             if desired_state != self._last_applied_state:
                 try:
