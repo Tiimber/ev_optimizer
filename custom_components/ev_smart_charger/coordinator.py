@@ -573,8 +573,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         target_amps = safe_amps if should_charge else 0
         desired_state = "charging" if should_charge else "paused"
 
-        if "Maintenance mode active" in plan.get("charging_summary", ""):
-            should_charge = True
+        if "Maintenance mode active" in plan.get("charging_summary", "") and should_charge:
             target_amps = 0
             desired_state = "maintenance"
 

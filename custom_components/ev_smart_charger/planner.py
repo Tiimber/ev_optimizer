@@ -270,6 +270,8 @@ def generate_charging_plan(
             ):
                 plan["should_charge_now"] = True
                 break
+        if not data.get("car_plugged"):
+            plan["should_charge_now"] = False
     else:
         soc_needed = final_target - current_soc
         kwh_needed = (soc_needed / 100.0) * config_settings["car_capacity"]
