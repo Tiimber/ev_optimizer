@@ -390,3 +390,54 @@ def test_overload_prevention_extends_charging_schedule():
     # Verify the overload prevention minutes are tracked in the plan
     assert plan_extended.get("overload_prevention_minutes") == 30
 
+
+def test_waits_for_additional_price_data_when_departure_beyond_horizon_and_slack_exists():
+    """If departure is beyond known prices (e.g., tomorrow prices not published yet),
+    the planner should wait (not charge now) when there is still enough time left
+    to reach the target before departure.
+    """
+    now = datetime(2025, 1, 15, 13, 0)
+    hourly_today = [2.0 for _ in range(24)]
+
+    data = {
+        "price_data": {"today": hourly_today, "tomorrow": []},
+        const.ENTITY_TARGET_SOC: 80,
+        const.ENTITY_SMART_SWITCH: True,
+        const.ENTITY_MIN_SOC: 20,
+        const.ENTITY_DEPARTURE_TIME: time(5, 0),  # next day (since 05:00 < 13:00)
+        "car_soc": 58,
+        "car_plugged": True,
+    }
+    config = {"max_fuse": 20.0, "charger_loss": 10.0, "car_capacity": 80.0, "has_price_sensor": True}
+
+    plan = planner.generate_charging_plan(data, config, manual_override=False, now=now)
+    assert plan["should_charge_now"] is False
+    assert "Waiting for additional price data" in plan.get("charging_summary", "")
+    # While waiting, the schedule should still be present but with no active slots
+    schedule = plan.get("charging_schedule", [])
+    assert isinstance(schedule, list)
+    assert all(not s.get("active") for s in schedule)
+
+
+def test_does_not_wait_for_additional_price_data_when_time_is_tight():
+    """When departure is beyond known prices but there is not enough slack, the
+    planner should start charging based on what it knows.
+    """
+    now = datetime(2025, 1, 15, 13, 0)
+    hourly_today = [2.0 for _ in range(24)]
+
+    data = {
+        "price_data": {"today": hourly_today, "tomorrow": []},
+        const.ENTITY_TARGET_SOC: 100,
+        const.ENTITY_SMART_SWITCH: True,
+        const.ENTITY_MIN_SOC: 20,
+        const.ENTITY_DEPARTURE_TIME: time(2, 0),  # next day (since 02:00 < 13:00)
+        "car_soc": 10,
+        "car_plugged": True,
+    }
+    # Very large battery -> requires many hours, leaving little/no slack.
+    config = {"max_fuse": 16.0, "charger_loss": 10.0, "car_capacity": 250.0, "has_price_sensor": True}
+
+    plan = planner.generate_charging_plan(data, config, manual_override=False, now=now)
+    assert plan["should_charge_now"] is True
+

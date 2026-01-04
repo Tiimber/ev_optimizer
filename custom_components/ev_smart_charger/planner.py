@@ -208,6 +208,14 @@ def generate_charging_plan(
     dept_dt = get_departure_time(data, now, data.get("calendar_events"))
     calc_window = [p for p in prices if p["start"] < dept_dt]
 
+    # If the departure is beyond our available price horizon, we can end up making
+    # a suboptimal decision (e.g., charging immediately on expensive afternoon
+    # prices while cheaper night prices haven't been published yet).
+    # In that situation, wait for more price data *only if* there's still enough
+    # time left to reach the target SoC.
+    last_price_end = max((p["end"] for p in prices), default=None)
+    price_horizon_covers_departure = bool(last_price_end and last_price_end >= dept_dt)
+
     if not calc_window:
         plan["should_charge_now"] = True
         plan["charging_summary"] = "Departure passed. Charging."
@@ -228,16 +236,19 @@ def generate_charging_plan(
         status_note = "(Calendar Event)"
     else:
         final_target = data.get(ENTITY_TARGET_SOC, 80)
-        status_note = "(Smart)"
-        min_price_in_window = min(slot["price"] for slot in calc_window)
-        limit_1 = data.get(ENTITY_PRICE_LIMIT_1, 0.5)
-        target_1 = data.get(ENTITY_TARGET_SOC_1, 100)
-        limit_2 = data.get(ENTITY_PRICE_LIMIT_2, 1.5)
-        target_2 = data.get(ENTITY_TARGET_SOC_2, 80)
-        if min_price_in_window <= limit_1:
-            final_target = max(final_target, target_1)
-        elif min_price_in_window <= limit_2:
-            final_target = max(final_target, target_2)
+        if price_horizon_covers_departure:
+            status_note = "(Smart)"
+            min_price_in_window = min(slot["price"] for slot in calc_window)
+            limit_1 = data.get(ENTITY_PRICE_LIMIT_1, 0.5)
+            target_1 = data.get(ENTITY_TARGET_SOC_1, 100)
+            limit_2 = data.get(ENTITY_PRICE_LIMIT_2, 1.5)
+            target_2 = data.get(ENTITY_TARGET_SOC_2, 80)
+            if min_price_in_window <= limit_1:
+                final_target = max(final_target, target_1)
+            elif min_price_in_window <= limit_2:
+                final_target = max(final_target, target_2)
+        else:
+            status_note = "(Smart - Waiting for prices)"
 
     final_target = max(final_target, min_guaranteed)
     plan["planned_target_soc"] = final_target
@@ -282,6 +293,54 @@ def generate_charging_plan(
         # P = 3 * 230 * Amps / 1000
         est_power_kw = min((3 * 230 * config_settings["max_fuse"]) / 1000.0, 11.0)
         hours_needed = kwh_to_pull / est_power_kw
+
+        # If we don't have price data all the way to departure, prefer waiting for
+        # updated price data as long as we can still reach the target before departure.
+        # This avoids starting charging on expensive prices when cheaper prices may
+        # appear in the yet-unknown portion of the window.
+        if not price_horizon_covers_departure:
+            latest_start_dt = dept_dt - timedelta(
+                hours=hours_needed + (overload_prevention_minutes / 60.0)
+            )
+            if now < latest_start_dt:
+                plan["should_charge_now"] = False
+                horizon_str = last_price_end.strftime("%H:%M") if last_price_end else "unknown"
+                plan["charging_summary"] = (
+                    f"Waiting for additional price data before planning. "
+                    f"Known prices until {horizon_str}; departure at {dept_dt.strftime('%H:%M')} {time_source}. "
+                    f"Latest start to reach target is ~{latest_start_dt.strftime('%H:%M')}."
+                )
+                # Keep schedule visible (all inactive) but don't select slots yet.
+                selected_slots = []
+                selected_start_times = set()
+                calc_window = [p for p in prices if p["start"] < dept_dt]
+                # Skip slot selection logic for now.
+                schedule_data = []
+                for slot in prices:
+                    schedule_data.append(
+                        {
+                            "start": slot["start"].isoformat(),
+                            "end": slot["end"].isoformat(),
+                            "price": slot["price"],
+                            "active": False,
+                        }
+                    )
+                if schedule_data:
+                    last_slot = schedule_data[-1]
+                    schedule_data.append(
+                        {
+                            "start": last_slot["end"],
+                            "end": last_slot["end"],
+                            "price": last_slot["price"],
+                            "active": False,
+                        }
+                    )
+                plan["charging_schedule"] = schedule_data
+
+                if not data.get("car_plugged"):
+                    plan["should_charge_now"] = False
+
+                return plan
 
         slot_duration_hours = (
             calc_window[0]["end"] - calc_window[0]["start"]

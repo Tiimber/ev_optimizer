@@ -29,8 +29,8 @@ async def test_full_charging_cycle(pkg_loader, mock_hass):
     
     # Load Real Modules
     const = pkg_loader("const")
+    pkg_loader("planner")
     coordinator_mod = pkg_loader("coordinator")
-    pkg_loader("planner") 
     
     # SETUP
     entry = MagicMock()
