@@ -326,13 +326,14 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
     async def async_trigger_report_generation(self):
         """Manually trigger image generation for the current or last session."""
         report = None
-        if self.current_session:
+        if self.session_manager.current_session:
             _LOGGER.info("Generating report for ACTIVE session.")
-            report = self._calculate_session_totals()
-            report["end_time"] = datetime.now().isoformat()
-        elif self.last_session_data:
+            report = self.session_manager.calculate_session_totals(self.currency)
+            if report:
+                report["end_time"] = datetime.now().isoformat()
+        elif self.session_manager.last_session_data:
             _LOGGER.info("Regenerating report for LAST FINISHED session.")
-            report = self.last_session_data
+            report = self.session_manager.last_session_data
 
         if report:
             save_path = self.hass.config.path(

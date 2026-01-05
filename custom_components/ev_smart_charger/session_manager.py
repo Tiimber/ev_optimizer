@@ -97,6 +97,10 @@ class SessionManager:
         self.current_session = None
         return report
 
+    def calculate_session_totals(self, currency: str, final_soc: float | None = None) -> dict:
+        """Calculate current totals for an ACTIVE session without ending it."""
+        return self._calculate_session_totals(currency, final_soc)
+
     def record_data_point(self, data: dict, user_settings: dict, last_applied_amps: float, last_applied_state: str):
         """Record a history data point for the active session."""
         if not self.current_session:

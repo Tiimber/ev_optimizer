@@ -159,3 +159,43 @@ def test_virtual_soc_resyncs_down_on_significant_drop_while_charging(pkg_loader,
 
     coord._update_virtual_soc({"car_soc": 58.0, "ch_l1": 0.0, "ch_l2": 0.0, "ch_l3": 0.0})
     assert coord._virtual_soc == 58.0
+
+
+def test_trigger_report_generation_uses_session_manager(pkg_loader, hass_mock):
+    coordinator_mod = pkg_loader("coordinator")
+    const = pkg_loader("const")
+
+    class Entry:
+        def __init__(self):
+            self.options = {}
+            self.data = {
+                const.CONF_MAX_FUSE: const.DEFAULT_MAX_FUSE,
+                const.CONF_CHARGER_LOSS: const.DEFAULT_LOSS,
+                const.CONF_CAR_CAPACITY: const.DEFAULT_CAPACITY,
+                const.CONF_CAR_SOC_SENSOR: None,
+            }
+            self.entry_id = "test"
+
+    coord = coordinator_mod.EVSmartChargerCoordinator(hass_mock, Entry())
+
+    # Stub event bus used by SessionManager logging
+    hass_mock.bus = type("B", (), {"async_fire": lambda self, *args, **kwargs: None})()
+
+    # Minimal hass config stub for path building and executor job
+    hass_mock.config = type("C", (), {"path": lambda self, *p: "/tmp/" + "/".join(p)})()
+
+    async def _executor_job(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    hass_mock.async_add_executor_job = _executor_job
+
+    # Fake an active session with a single point (should still produce a dict)
+    coord.session_manager.current_session = {
+        "start_time": "2025-01-01T00:00:00",
+        "history": [{"time": "2025-01-01T00:00:00", "soc": 40, "amps": 0, "charging": 0, "price": 0}],
+        "log": [],
+    }
+
+    # Should not raise (this used to crash looking for coord.current_session)
+    import asyncio
+    asyncio.get_event_loop().run_until_complete(coord.async_trigger_report_generation())
