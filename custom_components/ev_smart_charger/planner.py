@@ -206,6 +206,7 @@ def generate_charging_plan(
         return plan
 
     dept_dt = get_departure_time(data, now, data.get("calendar_events"))
+    plan["departure_time"] = dept_dt.isoformat()
     calc_window = [p for p in prices if p["start"] < dept_dt]
 
     # If the departure is beyond our available price horizon, we can end up making

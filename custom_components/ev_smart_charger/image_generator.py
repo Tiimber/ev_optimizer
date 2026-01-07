@@ -379,6 +379,13 @@ def generate_plan_image(data: dict, file_path: str):
     schedule = data.get("charging_schedule", [])
     if not schedule:
         return
+    
+    # Filter schedule to only show up to departure time
+    departure_time_str = data.get("departure_time")
+    if departure_time_str:
+        departure_dt = datetime.fromisoformat(departure_time_str)
+        schedule = [s for s in schedule if datetime.fromisoformat(s["start"]) <= departure_dt]
+    
     valid_slots = [s for s in schedule if s["price"] is not None]
     if not valid_slots:
         return
