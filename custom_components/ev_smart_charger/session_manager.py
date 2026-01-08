@@ -78,13 +78,11 @@ class SessionManager:
             "start_time": datetime.now().isoformat(),
             "history": [],
             "log": [],
+            "session_overload_minutes": 0.0,
         }
-        # Reset prevention minutes for new session? 
-        # Actually logic in coordinator seemed to persist it, let's keep it consistent or reset?
-        # Coordinator didn't reset it explicitly on plug-in, but likely should?
-        # Actually coordinator loaded it from persistence.
-        # Let's assume it resets on new session logic in planner usually handles clean state.
-        # But for now, let's just track session start.
+        # Reset session-specific overload tracking
+        # Keep the global counter for planner (persisted across sessions)
+        # but track session-specific minutes separately for reporting
 
     def stop_session(self, user_settings: dict, currency: str, final_soc: float = None):
         """Finalize the current session."""
@@ -146,6 +144,9 @@ class SessionManager:
     def add_overload_minutes(self, minutes: float):
         """Accumulate overload prevention minutes."""
         self.overload_prevention_minutes += minutes
+        # Also track in current session if active
+        if self.current_session:
+            self.current_session["session_overload_minutes"] = self.current_session.get("session_overload_minutes", 0.0) + minutes
 
     def _calculate_session_totals(self, currency: str, final_soc: float = None) -> dict:
         """Calculate totals for the finished session."""
@@ -173,7 +174,7 @@ class SessionManager:
              "currency": currency,
              "graph_data": history,
              "session_log": self.current_session["log"],
-             "overload_prevention_minutes": self.overload_prevention_minutes,
+             "overload_prevention_minutes": self.current_session.get("session_overload_minutes", 0.0),
             }
 
         prev = datetime.fromisoformat(history[0]["time"])
@@ -202,5 +203,5 @@ class SessionManager:
             "currency": currency,
             "graph_data": history,
             "session_log": self.current_session["log"],
-            "overload_prevention_minutes": self.overload_prevention_minutes,
+            "overload_prevention_minutes": self.current_session.get("session_overload_minutes", 0.0),
         }
