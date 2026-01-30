@@ -1,6 +1,6 @@
-"""Constants for the EV Smart Charger integration."""
+"""Constants for the EV Optimizer integration."""
 
-DOMAIN = "ev_smart_charger"
+DOMAIN = "ev_optimizer"
 
 # Configuration Keys
 CONF_CAR_SOC_SENSOR = "car_soc_sensor"

@@ -173,7 +173,7 @@ def test_update_callback_debounces(pkg_loader, mock_hass):
         
         # Second call - debounced
         # Need to patch datetime inside coordinator mod
-        with patch("custom_components.ev_smart_charger.coordinator.datetime") as mock_dt:
+        with patch("custom_components.ev_optimizer.coordinator.datetime") as mock_dt:
             # Note: since coordinator IS loaded from that path by pkg_loader, this patch *should* work
             # provided sys.modules is set up correctly by pkg_loader.
             # pkg_loader uses _load_pkg_module which puts it in sys.modules.

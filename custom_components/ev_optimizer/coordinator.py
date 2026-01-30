@@ -342,7 +342,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
         if report:
             save_path = self.hass.config.path(
-                "www", "ev_smart_charger_last_session.png"
+                "www", "ev_optimizer_last_session.png"
             )
             await self.hass.async_add_executor_job(
                 generate_report_image, report, save_path
@@ -364,7 +364,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         )
         data_with_fees[ENTITY_PRICE_VAT] = self.user_settings.get(ENTITY_PRICE_VAT, 0.0)
 
-        save_path = self.hass.config.path("www", "ev_smart_charger_plan.png")
+        save_path = self.hass.config.path("www", "ev_optimizer_plan.png")
         await self.hass.async_add_executor_job(
             generate_plan_image, data_with_fees, save_path
         )
@@ -923,7 +923,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         if report:
             try:
                 save_path = self.hass.config.path(
-                    "www", "ev_smart_charger_last_session.png"
+                    "www", "ev_optimizer_last_session.png"
                 )
                 self.hass.async_add_executor_job(generate_report_image, report, save_path)
             except Exception as e:
@@ -946,7 +946,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         # Build comprehensive debug dump
         debug_dump = {
             "timestamp": datetime.now().isoformat(),
-            "description": "Complete state dump for ev_smart_charger debugging/simulation",
+            "description": "Complete state dump for ev_optimizer debugging/simulation",
             
             # Configuration
             "config_settings": self.config_settings.copy(),
@@ -1018,7 +1018,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         json_dump = json.dumps(debug_dump, indent=2, default=str)
         
         # Save to file
-        file_path = self.hass.config.path("www", "ev_smart_charger_debug_dump.json")
+        file_path = self.hass.config.path("www", "ev_optimizer_debug_dump.json")
         _LOGGER.debug(f"💾 Saving debug dump to: {file_path}")
         
         try:
@@ -1027,7 +1027,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             with open(file_path, 'w') as f:
                 f.write(json_dump)
             _LOGGER.info(f"✅ Debug dump saved to: {file_path}")
-            _LOGGER.info(f"📥 Download at: /local/ev_smart_charger_debug_dump.json")
+            _LOGGER.info(f"📥 Download at: /local/ev_optimizer_debug_dump.json")
             
             # Also log to console for easy copy/paste
             _LOGGER.info("=" * 80)

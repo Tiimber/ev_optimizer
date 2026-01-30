@@ -82,9 +82,9 @@ async def test_full_charging_cycle(pkg_loader, mock_hass):
     set_state("sensor.price", today_prices[datetime.now().hour], price_attrs)
 
     # Patch with string paths to capture module-level datetime imports
-    with patch("custom_components.ev_smart_charger.coordinator.async_track_state_change_event"), \
-         patch("custom_components.ev_smart_charger.coordinator.datetime") as mock_dt_coord, \
-         patch("custom_components.ev_smart_charger.planner.datetime") as mock_dt_plan:
+    with patch("custom_components.ev_optimizer.coordinator.async_track_state_change_event"), \
+         patch("custom_components.ev_optimizer.coordinator.datetime") as mock_dt_coord, \
+         patch("custom_components.ev_optimizer.planner.datetime") as mock_dt_plan:
 
         # Sync all mock datetime objects
         for mock_dt in [mock_dt_coord, mock_dt_plan]:

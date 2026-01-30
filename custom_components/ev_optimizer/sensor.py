@@ -38,7 +38,7 @@ class EVSmartChargerBaseSensor(CoordinatorEntity, SensorEntity):
 class EVSmartChargerStatusSensor(EVSmartChargerBaseSensor):
     """Sensor showing the overall status."""
     _attr_name = "Charger Logic Status"
-    _attr_unique_id = "ev_smart_charger_status"
+    _attr_unique_id = "ev_optimizer_status"
     _attr_icon = "mdi:ev-station"
 
     @property
@@ -64,7 +64,7 @@ class EVSmartChargerStatusSensor(EVSmartChargerBaseSensor):
 class EVMaxAvailableCurrentSensor(EVSmartChargerBaseSensor):
     """Sensor showing max safe current."""
     _attr_name = "Max Safe Current"
-    _attr_unique_id = "ev_smart_charger_safe_current"
+    _attr_unique_id = "ev_optimizer_safe_current"
     _attr_icon = "mdi:current-ac"
     _attr_native_unit_of_measurement = "A"
 
@@ -76,7 +76,7 @@ class EVMaxAvailableCurrentSensor(EVSmartChargerBaseSensor):
 class EVPriceStatusSensor(EVSmartChargerBaseSensor):
     """Sensor showing price logic status."""
     _attr_name = "Price Logic"
-    _attr_unique_id = "ev_smart_charger_price_logic"
+    _attr_unique_id = "ev_optimizer_price_logic"
     _attr_icon = "mdi:cash-clock"
 
     @property
@@ -86,7 +86,7 @@ class EVPriceStatusSensor(EVSmartChargerBaseSensor):
 class EVChargingPlanSensor(EVSmartChargerBaseSensor):
     """Sensor containing the calculated schedule."""
     _attr_name = "Charging Schedule"
-    _attr_unique_id = "ev_smart_charger_plan"
+    _attr_unique_id = "ev_optimizer_plan"
     _attr_icon = "mdi:calendar-clock"
 
     @property
@@ -121,7 +121,7 @@ class EVChargingPlanSensor(EVSmartChargerBaseSensor):
 class EVSmartChargerLastSessionSensor(EVSmartChargerBaseSensor):
     """Sensor containing the report for the last finished session."""
     _attr_name = "Last Charging Session"
-    _attr_unique_id = "ev_smart_charger_last_session"
+    _attr_unique_id = "ev_optimizer_last_session"
     _attr_icon = "mdi:history"
 
     @property
@@ -154,25 +154,25 @@ class EVSmartChargerLastSessionSensor(EVSmartChargerBaseSensor):
 class EVDebugDumpPathSensor(EVSmartChargerBaseSensor):
     """Sensor showing the path to the debug dump file."""
     _attr_name = "Debug Dump File"
-    _attr_unique_id = "ev_smart_charger_debug_dump_file"
+    _attr_unique_id = "ev_optimizer_debug_dump_file"
     _attr_icon = "mdi:file-document"
 
     @property
     def state(self):
         """Return the URL to download the debug dump."""
-        return "/local/ev_smart_charger_debug_dump.json"
+        return "/local/ev_optimizer_debug_dump.json"
 
     @property
     def extra_state_attributes(self):
         """Return additional info."""
         import os
-        file_path = self.coordinator.hass.config.path("www", "ev_smart_charger_debug_dump.json")
+        file_path = self.coordinator.hass.config.path("www", "ev_optimizer_debug_dump.json")
         file_exists = os.path.exists(file_path)
         
         attrs = {
             "file_path": file_path,
             "file_exists": file_exists,
-            "download_url": "/local/ev_smart_charger_debug_dump.json",
+            "download_url": "/local/ev_optimizer_debug_dump.json",
         }
         
         if file_exists:

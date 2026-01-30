@@ -23,8 +23,8 @@ sys.modules['homeassistant.components.persistent_notification'] = MagicMock()
 # Add the custom_components directory to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from custom_components.ev_smart_charger import planner
-from custom_components.ev_smart_charger.const import (
+from custom_components.ev_optimizer import planner
+from custom_components.ev_optimizer.const import (
     ENTITY_TARGET_SOC,
     ENTITY_MIN_SOC,
     ENTITY_DEPARTURE_TIME,

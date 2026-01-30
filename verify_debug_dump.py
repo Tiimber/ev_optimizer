@@ -11,7 +11,7 @@ def check_const_file():
     print("Checking const.py for required constants...")
     print("=" * 70)
     
-    with open('custom_components/ev_smart_charger/const.py', 'r') as f:
+    with open('custom_components/ev_optimizer/const.py', 'r') as f:
         const_content = f.read()
     
     required = [
@@ -57,7 +57,7 @@ def check_coordinator_imports():
     print("Checking coordinator.py imports...")
     print("=" * 70)
     
-    with open('custom_components/ev_smart_charger/coordinator.py', 'r') as f:
+    with open('custom_components/ev_optimizer/coordinator.py', 'r') as f:
         coordinator_content = f.read()
     
     required = [
@@ -112,7 +112,7 @@ def check_dump_debug_state_usage():
     print("Checking dump_debug_state method...")
     print("=" * 70)
     
-    with open('custom_components/ev_smart_charger/coordinator.py', 'r') as f:
+    with open('custom_components/ev_optimizer/coordinator.py', 'r') as f:
         coordinator_content = f.read()
     
     # Find the dump_debug_state method

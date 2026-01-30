@@ -1,6 +1,8 @@
-# EV Smart Charger & Load Balancer for Home Assistant
+# EV Optimizer for Home Assistant
 
-**EV Smart Charger** is a custom Home Assistant integration designed to optimize electric vehicle charging based on real-time electricity prices (eg. Nordpool), household load balancing (P1 Meter), and user scheduling. It also allows you to charge your car to different percentages based on if the electricity price is very low of high.
+***Optimize your EV charging costs with smart scheduling and load balancing***
+
+**EV Optimizer** is a custom Home Assistant integration designed to optimize electric vehicle charging based on real-time electricity prices (eg. Nordpool), household load balancing (P1 Meter), and user scheduling. It also allows you to charge your car to different percentages based on if the electricity price is very low of high.
 
 This is written to fit my need, which is a very specific combination, but I've tried to cover a more generic use case and I do believe you could create your own switches and sensors with custom templates and automations to make practically any brands work. My specific combination is Nordpool for electricity spot price, a P1ib device hooked into my electric meters' HAN-port of my electric meter, Zaptec Go as charger for my Hyundai Kona, connected through the Hyundai / Kia Connect Custom Integration.
 
@@ -39,19 +41,19 @@ Before installing, ensure you have the following:
 
 1.  Open **HACS** in Home Assistant.
 2.  Go to **Integrations** > **Top Right Menu** > **Custom repositories**.
-3.  Add `Tiimber/ev_smart_charger` as an **Integration**.
+3.  Add `Tiimber/ev_optimizer` as an **Integration**.
 4.  Click **Download**.
 5.  Restart Home Assistant.
 
 ### Method 2: Manual
 
-1.  Copy the `custom_components/ev_smart_charger` folder into your Home Assistant `config/custom_components/` directory.
+1.  Copy the `custom_components/ev_optimizer` folder into your Home Assistant `config/custom_components/` directory.
 2.  Restart Home Assistant.
 
 ## Configuration
 
 1.  Go to **Settings > Devices & Services > Add Integration**.
-2.  Search for **EV Smart Charger** and follow the configuration steps.
+2.  Search for **EV Optimizer** and follow the configuration steps.
 
 ## Configuration Parameters
 
@@ -212,10 +214,10 @@ If the integration is not behaving as expected (e.g., charging starts immediatel
    logger:
      default: info
      logs:
-       custom_components.ev_smart_charger: debug
+       custom_components.ev_optimizer: debug
    ```
 
-2. **Use the "Dump Debug State" button** (or service `ev_smart_charger.dump_debug_state`)
+2. **Use the "Dump Debug State" button** (or service `ev_optimizer.dump_debug_state`)
    - This outputs a complete JSON snapshot of all configuration, sensor data, and price data to your logs
    - Copy the JSON and share it when reporting issues
 

@@ -5,14 +5,14 @@ import sys
 from pathlib import Path
 
 # Load modules directly to avoid importing Home Assistant at package import-time
-pkg_dir = Path(__file__).resolve().parents[1] / "custom_components" / "ev_smart_charger"
+pkg_dir = Path(__file__).resolve().parents[1] / "custom_components" / "ev_optimizer"
 
 # Fixed timestamp for deterministic tests
 FIXED_NOW = datetime(2025, 1, 15, 12, 0)
 
 
 def _load_package_module(full_name, path):
-    """Load a module using the provided full package-style name (e.g. custom_components.ev_smart_charger.const)
+    """Load a module using the provided full package-style name (e.g. custom_components.ev_optimizer.const)
     This ensures relative imports inside the module work by preloading sibling modules into sys.modules.
     """
     spec = importlib.util.spec_from_file_location(full_name, str(path))
@@ -22,8 +22,8 @@ def _load_package_module(full_name, path):
     return mod
 
 # Load const first under the package namespace, then planner so relative imports succeed
-const = _load_package_module("custom_components.ev_smart_charger.const", pkg_dir / "const.py")
-planner = _load_package_module("custom_components.ev_smart_charger.planner", pkg_dir / "planner.py")
+const = _load_package_module("custom_components.ev_optimizer.const", pkg_dir / "const.py")
+planner = _load_package_module("custom_components.ev_optimizer.planner", pkg_dir / "planner.py")
 
 
 def make_price_list(length=96, base=2.0, low_indices=None, low_value=0.1, mid_indices=None, mid_value=1.4):

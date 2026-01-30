@@ -80,7 +80,7 @@ def mock_entry():
 
 def test_constants_import(mock_homeassistant):
     """Test that all constants can be imported."""
-    from custom_components.ev_smart_charger.const import (
+    from custom_components.ev_optimizer.const import (
         ENTITY_TARGET_SOC,
         ENTITY_MIN_SOC,
         ENTITY_PRICE_LIMIT_1,
@@ -117,7 +117,7 @@ def test_constants_import(mock_homeassistant):
 def test_coordinator_imports(mock_homeassistant):
     """Test that coordinator imports without errors."""
     try:
-        from custom_components.ev_smart_charger.coordinator import EVSmartChargerCoordinator
+        from custom_components.ev_optimizer.coordinator import EVSmartChargerCoordinator
         print("✅ Coordinator imported successfully")
     except ImportError as e:
         pytest.fail(f"Failed to import coordinator: {e}")
@@ -125,7 +125,7 @@ def test_coordinator_imports(mock_homeassistant):
 
 def test_session_manager_structure(mock_homeassistant):
     """Test that SessionManager has expected attributes."""
-    from custom_components.ev_smart_charger.session_manager import SessionManager
+    from custom_components.ev_optimizer.session_manager import SessionManager
     
     hass = MagicMock()
     sm = SessionManager(hass)
@@ -144,8 +144,8 @@ def test_session_manager_structure(mock_homeassistant):
 
 def test_dump_debug_state_basic(mock_homeassistant, mock_hass, mock_entry):
     """Test basic dump_debug_state functionality."""
-    from custom_components.ev_smart_charger.coordinator import EVSmartChargerCoordinator
-    from custom_components.ev_smart_charger.const import (
+    from custom_components.ev_optimizer.coordinator import EVSmartChargerCoordinator
+    from custom_components.ev_optimizer.const import (
         ENTITY_TARGET_SOC,
         ENTITY_MIN_SOC,
         ENTITY_PRICE_LIMIT_1,
@@ -205,7 +205,7 @@ def test_dump_debug_state_basic(mock_homeassistant, mock_hass, mock_entry):
 
 def test_dump_debug_state_empty_data(mock_homeassistant, mock_hass, mock_entry):
     """Test dump_debug_state with minimal/empty data."""
-    from custom_components.ev_smart_charger.coordinator import EVSmartChargerCoordinator
+    from custom_components.ev_optimizer.coordinator import EVSmartChargerCoordinator
     
     coordinator = EVSmartChargerCoordinator(mock_hass, mock_entry)
     
@@ -227,7 +227,7 @@ def test_dump_debug_state_empty_data(mock_homeassistant, mock_hass, mock_entry):
 
 def test_dump_debug_state_with_session(mock_homeassistant, mock_hass, mock_entry):
     """Test dump_debug_state when a session is active."""
-    from custom_components.ev_smart_charger.coordinator import EVSmartChargerCoordinator
+    from custom_components.ev_optimizer.coordinator import EVSmartChargerCoordinator
     
     coordinator = EVSmartChargerCoordinator(mock_hass, mock_entry)
     coordinator.user_settings = {}

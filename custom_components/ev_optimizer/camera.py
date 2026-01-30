@@ -42,8 +42,8 @@ class EVReportCamera(CoordinatorEntity, Camera):
 
         self._type_key = type_key
         self._attr_name = name
-        self._attr_unique_id = f"ev_smart_charger_camera_{type_key}"
-        self._image_filename = f"ev_smart_charger_{type_key}.png"
+        self._attr_unique_id = f"ev_optimizer_camera_{type_key}"
+        self._image_filename = f"ev_optimizer_{type_key}.png"
         self._attr_content_type = "image/png"
 
     @property

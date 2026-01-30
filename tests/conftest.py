@@ -91,7 +91,7 @@ def ha_stubs():
 @pytest.fixture
 def pkg_loader():
     def _loader(name):
-        base = Path(__file__).resolve().parents[1] / "custom_components" / "ev_smart_charger"
+        base = Path(__file__).resolve().parents[1] / "custom_components" / "ev_optimizer"
         # Ensure package entries exist so relative imports inside modules work
         pkg_root = Path(__file__).resolve().parents[1] / "custom_components"
         if "custom_components" not in sys.modules:
@@ -99,16 +99,16 @@ def pkg_loader():
             pkg_mod.__path__ = [str(pkg_root)]
             sys.modules["custom_components"] = pkg_mod
 
-        pkg_ev = "custom_components.ev_smart_charger"
+        pkg_ev = "custom_components.ev_optimizer"
         if pkg_ev not in sys.modules:
             ev_mod = ModuleType(pkg_ev)
             ev_mod.__path__ = [str(base)]
             sys.modules[pkg_ev] = ev_mod
             # Fix: Attach to parent
-            setattr(sys.modules["custom_components"], "ev_smart_charger", ev_mod)
+            setattr(sys.modules["custom_components"], "ev_optimizer", ev_mod)
 
         # Load the requested module
-        mod = _load_pkg_module(f"custom_components.ev_smart_charger.{name}", base / f"{name}.py")
+        mod = _load_pkg_module(f"custom_components.ev_optimizer.{name}", base / f"{name}.py")
         
         # Fix: Attach this module to the package
         setattr(sys.modules[pkg_ev], name, mod)
