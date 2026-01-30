@@ -46,6 +46,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Setup real-time listeners
     coordinator.async_setup_listeners()
     entry.async_on_unload(coordinator.async_shutdown)
+    
+    # Register services
+    async def handle_dump_debug_state(call):
+        """Handle the dump_debug_state service call."""
+        coordinator.dump_debug_state()
+    
+    hass.services.async_register(
+        DOMAIN,
+        "dump_debug_state",
+        handle_dump_debug_state,
+    )
 
     return True
 

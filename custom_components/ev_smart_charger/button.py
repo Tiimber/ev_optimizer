@@ -23,6 +23,7 @@ async def async_setup_entry(
             EVClearOverrideButton(coordinator),
             EVGenerateReportButton(coordinator),
             EVGeneratePlanButton(coordinator),
+            EVDumpDebugStateButton(coordinator),
         ]
     )
 
@@ -73,3 +74,15 @@ class EVGeneratePlanButton(CoordinatorEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Handle the button press."""
         await self.coordinator.async_trigger_plan_image_generation()
+
+
+class EVDumpDebugStateButton(CoordinatorEntity, ButtonEntity):
+    """Button to dump complete debug state to logs."""
+
+    _attr_name = "Dump Debug State"
+    _attr_unique_id = "ev_smart_dump_debug"
+    _attr_icon = "mdi:bug-check"
+
+    async def async_press(self) -> None:
+        """Handle the button press."""
+        self.coordinator.dump_debug_state()

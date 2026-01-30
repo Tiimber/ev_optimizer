@@ -1,5 +1,6 @@
 """Planning logic for EV Smart Charger."""
 
+import logging
 import math
 import re
 from datetime import timedelta, datetime, time
@@ -18,6 +19,8 @@ from .const import (
     ENTITY_PRICE_EXTRA_FEE,
     ENTITY_PRICE_VAT,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def calculate_load_balancing(data: dict, max_fuse: float) -> float:
@@ -136,6 +139,15 @@ def generate_charging_plan(
         now: Current datetime (for testing)
         overload_prevention_minutes: Minutes of accumulated charging time lost due to overload prevention
     """
+    now = now or datetime.now()
+    _LOGGER.debug(
+        "🔍 ===== CHARGING PLAN GENERATION START ===== Time: %s",
+        now.strftime("%Y-%m-%d %H:%M:%S")
+    )
+    _LOGGER.debug("📊 Input data: car_plugged=%s, car_soc=%s, smart_switch=%s, manual_override=%s",
+                  data.get("car_plugged"), data.get("car_soc"), 
+                  data.get(ENTITY_SMART_SWITCH, True), manual_override)
+    
     plan = {
         "should_charge_now": False,
         "scheduled_start": None,
@@ -150,22 +162,26 @@ def generate_charging_plan(
         plan["charging_summary"] = "Smart charging disabled. Charging immediately."
         if not data.get("car_plugged"):
             plan["should_charge_now"] = False
+        _LOGGER.debug("⚡ DECISION: Smart charging DISABLED → should_charge=%s (plugged=%s)",
+                      plan["should_charge_now"], data.get("car_plugged"))
         return plan
 
-    now = now or datetime.now()
     prices = []
     raw_today = data["price_data"].get("today", [])
 
     if not raw_today:
         if not config_settings.get("has_price_sensor"):
             plan["charging_summary"] = "No Price Sensor. Load Balancing Mode."
+            _LOGGER.debug("📍 No price sensor configured - load balancing mode")
         else:
             plan["charging_summary"] = (
                 "Error: Price sensor configured but no data received."
             )
+            _LOGGER.warning("⚠️ Price sensor configured but NO DATA received!")
         plan["should_charge_now"] = True
         if not data.get("car_plugged"):
             plan["should_charge_now"] = False
+        _LOGGER.debug("⚡ DECISION: No price data → should_charge=%s", plan["should_charge_now"])
         return plan
 
     raw_tomorrow = data["price_data"].get("tomorrow", [])
@@ -194,6 +210,12 @@ def generate_charging_plan(
         raw_today = [float(x) for x in raw_today.split(",")]
     if isinstance(raw_tomorrow, str):
         raw_tomorrow = [float(x) for x in raw_tomorrow.split(",")]
+    
+    _LOGGER.debug("💰 Price data: today=%d slots, tomorrow=%d slots, tomorrow_valid=%s",
+                  len(raw_today) if raw_today else 0,
+                  len(raw_tomorrow) if raw_tomorrow else 0,
+                  data["price_data"].get("tomorrow_valid", False))
+    
     prices.extend(parse_price_list(raw_today, now.date()))
     if data["price_data"].get("tomorrow_valid", False) or raw_tomorrow:
         prices.extend(parse_price_list(raw_tomorrow, now.date() + timedelta(days=1)))
@@ -208,6 +230,11 @@ def generate_charging_plan(
     dept_dt = get_departure_time(data, now, data.get("calendar_events"))
     plan["departure_time"] = dept_dt.isoformat()
     calc_window = [p for p in prices if p["start"] < dept_dt]
+    
+    _LOGGER.debug("🕐 Departure time: %s (from %s)",
+                  dept_dt.strftime("%Y-%m-%d %H:%M"),
+                  "calendar" if data.get("calendar_events") else "manual setting")
+    _LOGGER.debug("📈 Price window: %d slots available until departure", len(calc_window))
 
     # If the departure is beyond our available price horizon, we can end up making
     # a suboptimal decision (e.g., charging immediately on expensive afternoon
@@ -216,6 +243,10 @@ def generate_charging_plan(
     # time left to reach the target SoC.
     last_price_end = max((p["end"] for p in prices), default=None)
     price_horizon_covers_departure = bool(last_price_end and last_price_end >= dept_dt)
+    
+    _LOGGER.debug("🌅 Price horizon: last_price_end=%s, covers_departure=%s",
+                  last_price_end.strftime("%Y-%m-%d %H:%M") if last_price_end else "None",
+                  price_horizon_covers_departure)
 
     if not calc_window:
         plan["should_charge_now"] = True
@@ -232,9 +263,11 @@ def generate_charging_plan(
     if manual_override:
         final_target = data.get(ENTITY_TARGET_OVERRIDE, 80)
         status_note = "(Manual Override)"
+        _LOGGER.debug("🎯 Target SOC: %d%% from MANUAL OVERRIDE", final_target)
     elif cal_soc is not None:
         final_target = cal_soc
         status_note = "(Calendar Event)"
+        _LOGGER.debug("🎯 Target SOC: %d%% from CALENDAR EVENT", final_target)
     else:
         final_target = data.get(ENTITY_TARGET_SOC, 80)
         if price_horizon_covers_departure:
@@ -244,16 +277,24 @@ def generate_charging_plan(
             target_1 = data.get(ENTITY_TARGET_SOC_1, 100)
             limit_2 = data.get(ENTITY_PRICE_LIMIT_2, 1.5)
             target_2 = data.get(ENTITY_TARGET_SOC_2, 80)
+            _LOGGER.debug("🎯 Target SOC: base=%d%%, min_price=%.2f, limit_1=%.2f→%d%%, limit_2=%.2f→%d%%",
+                          final_target, min_price_in_window, limit_1, target_1, limit_2, target_2)
             if min_price_in_window <= limit_1:
                 final_target = max(final_target, target_1)
+                _LOGGER.debug("   → Opportunistic Level 1 triggered: target=%d%%", final_target)
             elif min_price_in_window <= limit_2:
                 final_target = max(final_target, target_2)
+                _LOGGER.debug("   → Opportunistic Level 2 triggered: target=%d%%", final_target)
         else:
             status_note = "(Smart - Waiting for prices)"
+            _LOGGER.debug("🎯 Target SOC: %d%% (waiting for more price data)", final_target)
 
     final_target = max(final_target, min_guaranteed)
     plan["planned_target_soc"] = final_target
     current_soc = data.get("car_soc", 0) or 0.0
+    
+    _LOGGER.debug("🔋 Battery: current_soc=%.1f%%, target=%.1f%%, need=%.1f%%",
+                  current_soc, final_target, max(0, final_target - current_soc))
 
     selected_slots = []
     selected_start_times = set()
@@ -271,19 +312,23 @@ def generate_charging_plan(
         plan["charging_summary"] = (
             f"Target reached ({int(current_soc)}%). Maintenance mode active."
         )
+        _LOGGER.debug("✅ Target ALREADY REACHED - entering maintenance mode (price_limit=%.2f)", price_limit_high)
         for slot in calc_window:
             if slot["price"] <= price_limit_high:
                 selected_start_times.add(slot["start"])
                 selected_slots.append(slot)
+        _LOGGER.debug("   → Selected %d maintenance slots at price <= %.2f", len(selected_slots), price_limit_high)
         for slot in calc_window:
             if (
                 slot["start"] in selected_start_times
                 and slot["start"] <= now < slot["end"]
             ):
                 plan["should_charge_now"] = True
+                _LOGGER.debug("   → Current slot qualifies for maintenance charging")
                 break
         if not data.get("car_plugged"):
             plan["should_charge_now"] = False
+        _LOGGER.debug("⚡ DECISION: Maintenance mode → should_charge=%s", plan["should_charge_now"])
     else:
         soc_needed = final_target - current_soc
         kwh_needed = (soc_needed / 100.0) * config_settings["car_capacity"]
@@ -294,6 +339,11 @@ def generate_charging_plan(
         # P = 3 * 230 * Amps / 1000
         est_power_kw = min((3 * 230 * config_settings["max_fuse"]) / 1000.0, 11.0)
         hours_needed = kwh_to_pull / est_power_kw
+        
+        _LOGGER.debug("⚡ Energy calculation: kwh_needed=%.2f, efficiency=%.2f, kwh_to_pull=%.2f",
+                      kwh_needed, efficiency, kwh_to_pull)
+        _LOGGER.debug("⏱️  Timing: est_power=%.2f kW, hours_needed=%.2f, overload_prevention_min=%.1f",
+                      est_power_kw, hours_needed, overload_prevention_minutes)
 
         # If we don't have price data all the way to departure, prefer waiting for
         # updated price data as long as we can still reach the target before departure.
@@ -303,6 +353,8 @@ def generate_charging_plan(
             latest_start_dt = dept_dt - timedelta(
                 hours=hours_needed + (overload_prevention_minutes / 60.0)
             )
+            _LOGGER.debug("🕐 Price horizon does NOT cover departure. Latest start: %s (now: %s)",
+                          latest_start_dt.strftime("%H:%M"), now.strftime("%H:%M"))
             if now < latest_start_dt:
                 plan["should_charge_now"] = False
                 horizon_str = last_price_end.strftime("%H:%M") if last_price_end else "unknown"
@@ -311,6 +363,7 @@ def generate_charging_plan(
                     f"Known prices until {horizon_str}; departure at {dept_dt.strftime('%H:%M')} {time_source}. "
                     f"Latest start to reach target is ~{latest_start_dt.strftime('%H:%M')}."
                 )
+                _LOGGER.debug("⏸️  WAITING for more price data (still have time until %s)", latest_start_dt.strftime("%H:%M"))
                 # Keep schedule visible (all inactive) but don't select slots yet.
                 selected_slots = []
                 selected_start_times = set()
@@ -350,12 +403,19 @@ def generate_charging_plan(
             slot_duration_hours = 1.0
         slots_needed = math.ceil(hours_needed / slot_duration_hours)
         
+        _LOGGER.debug("📊 Slot calculation: duration=%.2fh, base_slots=%d, extra_slots=%d (overload compensation)",
+                      slot_duration_hours, slots_needed - extra_slots_needed, extra_slots_needed)
+        
         # Add extra slots to compensate for overload prevention minutes
         slots_needed += extra_slots_needed
 
         sorted_window = sorted(calc_window, key=lambda x: x["price"])
         selected_slots = sorted_window[:slots_needed]
         selected_start_times = {s["start"] for s in selected_slots}
+        
+        if selected_slots:
+            prices_str = ", ".join([f"{s['start'].strftime('%H:%M')}→{s['price']:.2f}" for s in sorted(selected_slots, key=lambda x: x['start'])])
+            _LOGGER.debug("✅ Selected %d cheapest slots: %s", len(selected_slots), prices_str)
 
         # Check Buffer Logic in Coordinator side or here?
         # Logic is simpler here:
@@ -483,8 +543,12 @@ def generate_charging_plan(
 
     if not data.get("car_plugged"):
         plan["should_charge_now"] = False
+        _LOGGER.debug("🔌 Car NOT plugged - forcing should_charge_now=False")
 
     if plan["should_charge_now"] and "amps" not in plan:
         plan["amps"] = config_settings.get("max_fuse", 16.0)
+    
+    _LOGGER.debug("⚡ ===== FINAL DECISION: should_charge_now=%s, target_soc=%d%% =====",
+                  plan["should_charge_now"], plan.get("planned_target_soc", 0))
 
     return plan

@@ -200,3 +200,29 @@ The integration automatically detects the interval granularity (15-min vs. hourl
 To visualize the plan with a graph (as seen in image above), use the **ApexCharts Card** (available via HACS).
 
 [All prepared Dashboard Card samples can be found here](./dashboard_cards.md)
+
+## Debugging & Troubleshooting
+
+If the integration is not behaving as expected (e.g., charging starts immediately when it shouldn't), the integration includes comprehensive debugging tools:
+
+### Quick Debugging Steps:
+
+1. **Enable debug logging** in `configuration.yaml`:
+   ```yaml
+   logger:
+     default: info
+     logs:
+       custom_components.ev_smart_charger: debug
+   ```
+
+2. **Use the "Dump Debug State" button** (or service `ev_smart_charger.dump_debug_state`)
+   - This outputs a complete JSON snapshot of all configuration, sensor data, and price data to your logs
+   - Copy the JSON and share it when reporting issues
+
+3. **Check the detailed logs** which now explain every decision step:
+   - Why a particular target SOC was chosen
+   - Which price slots were selected and why
+   - Whether the system is waiting for more price data
+   - Energy calculations and timing
+
+For complete debugging guide and examples, see [DEBUGGING.md](./DEBUGGING.md).

@@ -900,3 +900,99 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 self.hass.async_add_executor_job(generate_report_image, report, save_path)
             except Exception as e:
                 _LOGGER.warning(f"Could not trigger image generation: {e}")
+    
+    def dump_debug_state(self) -> dict:
+        """Dump complete state for debugging/simulation purposes.
+        
+        Returns a comprehensive snapshot of all inputs to the planner that can be
+        used to reproduce the exact charging decision in isolation.
+        """
+        import json
+        from datetime import datetime
+        
+        # Get current data snapshot
+        data = self.data if self.data else {}
+        
+        # Build comprehensive debug dump
+        debug_dump = {
+            "timestamp": datetime.now().isoformat(),
+            "description": "Complete state dump for ev_smart_charger debugging/simulation",
+            
+            # Configuration
+            "config_settings": self.config_settings.copy(),
+            
+            # User settings from UI
+            "user_settings": {
+                ENTITY_TARGET_SOC: self.user_settings.get(ENTITY_TARGET_SOC, 80),
+                ENTITY_MIN_SOC: self.user_settings.get("min_soc", 20),
+                ENTITY_DEPARTURE_TIME: str(self.user_settings.get(ENTITY_DEPARTURE_TIME, time(7, 0))),
+                ENTITY_DEPARTURE_OVERRIDE: str(self.user_settings.get(ENTITY_DEPARTURE_OVERRIDE, time(7, 0))),
+                ENTITY_SMART_SWITCH: self.user_settings.get(ENTITY_SMART_SWITCH, True),
+                ENTITY_TARGET_OVERRIDE: self.user_settings.get(ENTITY_TARGET_OVERRIDE, 80),
+                ENTITY_PRICE_LIMIT_1: self.user_settings.get(ENTITY_PRICE_LIMIT_1, 0.5),
+                ENTITY_TARGET_SOC_1: self.user_settings.get(ENTITY_TARGET_SOC_1, 100),
+                ENTITY_PRICE_LIMIT_2: self.user_settings.get(ENTITY_PRICE_LIMIT_2, 1.5),
+                ENTITY_TARGET_SOC_2: self.user_settings.get(ENTITY_TARGET_SOC_2, 80),
+                ENTITY_PRICE_EXTRA_FEE: self.user_settings.get(ENTITY_PRICE_EXTRA_FEE, 0.0),
+                ENTITY_PRICE_VAT: self.user_settings.get(ENTITY_PRICE_VAT, 0.0),
+            },
+            
+            # State flags
+            "manual_override_active": self.manual_override_active,
+            "previous_plugged_state": self.previous_plugged_state,
+            
+            # Current sensor data
+            "sensor_data": {
+                "car_soc": data.get("car_soc"),
+                "car_plugged": data.get("car_plugged"),
+                "car_limit": data.get("car_limit"),
+                "p1_l1": data.get("p1_l1"),
+                "p1_l2": data.get("p1_l2"),
+                "p1_l3": data.get("p1_l3"),
+                "ch_l1": data.get("ch_l1"),
+                "ch_l2": data.get("ch_l2"),
+                "ch_l3": data.get("ch_l3"),
+                "zap_limit_value": data.get("zap_limit_value"),
+            },
+            
+            # Price data (critical for reproducing decisions)
+            "price_data": {
+                "today": data.get("price_data", {}).get("today", []),
+                "tomorrow": data.get("price_data", {}).get("tomorrow", []),
+                "tomorrow_valid": data.get("price_data", {}).get("tomorrow_valid", False),
+            },
+            
+            # Calendar events if any
+            "calendar_events": data.get("calendar_events", []),
+            
+            # Session state
+            "session_info": {
+                "overload_prevention_minutes": self.session_manager.overload_prevention_minutes,
+                "session_active": self.session_manager.session_active,
+            },
+            
+            # Latest plan output (for comparison)
+            "last_plan": {
+                "should_charge_now": data.get("should_charge_now", False),
+                "planned_target_soc": data.get("planned_target_soc"),
+                "scheduled_start": data.get("scheduled_start"),
+                "departure_time": data.get("departure_time"),
+                "charging_summary": data.get("charging_summary", ""),
+            },
+            
+            # Entity configurations (for reference)
+            "entity_ids": {k: v for k, v in self.conf_keys.items() if v},
+        }
+        
+        # Format as JSON for easy copy/paste
+        json_dump = json.dumps(debug_dump, indent=2, default=str)
+        
+        _LOGGER.info("=" * 80)
+        _LOGGER.info("DEBUG STATE DUMP - Copy everything between the markers:")
+        _LOGGER.info("=" * 80)
+        _LOGGER.info(json_dump)
+        _LOGGER.info("=" * 80)
+        _LOGGER.info("End of debug dump. Copy the JSON above to share for debugging.")
+        _LOGGER.info("=" * 80)
+        
+        return debug_dump

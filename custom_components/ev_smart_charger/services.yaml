@@ -10,3 +10,11 @@ generate_plan_image:
   description: >
     Generates a thermal printer image of the current future charging plan, 
     including price graph and scheduled charging times.
+
+dump_debug_state:
+  name: Dump Debug State
+  description: >
+    Dumps complete integration state to logs for debugging. The output includes
+    all configuration, sensor data, price data, and decision inputs needed to
+    reproduce the current charging decision in isolation. Check Home Assistant
+    logs after calling this service to copy the JSON output.
