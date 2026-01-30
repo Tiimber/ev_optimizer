@@ -973,7 +973,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             # Session state
             "session_info": {
                 "overload_prevention_minutes": self.session_manager.overload_prevention_minutes,
-                "session_active": self.session_manager.session_active,
+                "session_active": self.session_manager.current_session is not None,
             },
             
             # Latest plan output (for comparison)
