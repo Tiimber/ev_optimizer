@@ -426,6 +426,15 @@ def generate_charging_plan(
         if selected_slots:
             prices_str = ", ".join([f"{s['start'].strftime('%H:%M')}→{s['price']:.2f}" for s in sorted(selected_slots, key=lambda x: x['start'])])
             _LOGGER.debug("✅ Selected %d cheapest slots: %s", len(selected_slots), prices_str)
+            # Show what current slot looks like
+            current_slot_info = None
+            for slot in calc_window:
+                if slot["start"] <= now < slot["end"]:
+                    current_slot_info = f"{slot['start'].strftime('%H:%M')}→{slot['price']:.2f}"
+                    break
+            _LOGGER.debug("📍 Current slot: %s (is_selected=%s)", 
+                         current_slot_info if current_slot_info else "None",
+                         "YES" if any(s["start"] <= now < s["end"] for s in selected_slots) else "NO")
 
         # Check Buffer Logic in Coordinator side or here?
         # Logic is simpler here:

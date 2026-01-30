@@ -30,14 +30,15 @@ class SessionManager:
             return
         self.action_log = data.get("action_log", [])
         self.last_session_data = data.get("last_session_data")
-        self.overload_prevention_minutes = data.get("overload_prevention_minutes", 0.0)
+        # Don't persist overload_prevention_minutes - always start fresh at 0
+        # It only applies to the current session and should reset on restart
 
     def to_dict(self) -> dict:
         """Return state for persistence."""
         return {
             "action_log": self.action_log,
             "last_session_data": self.last_session_data,
-            "overload_prevention_minutes": self.overload_prevention_minutes,
+            # Don't persist overload_prevention_minutes - session-specific only
         }
 
     def add_log(self, message: str):
@@ -80,9 +81,9 @@ class SessionManager:
             "log": [],
             "session_overload_minutes": 0.0,
         }
-        # Reset session-specific overload tracking
-        # Keep the global counter for planner (persisted across sessions)
-        # but track session-specific minutes separately for reporting
+        # Reset overload prevention counter for new session
+        # This tracks time lost to overload during the current plugged-in period
+        self.overload_prevention_minutes = 0.0
 
     def stop_session(self, user_settings: dict, currency: str, final_soc: float = None):
         """Finalize the current session."""

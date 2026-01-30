@@ -424,13 +424,25 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 )
 
             if not plan["should_charge_now"] and self._last_scheduled_end:
-                if (
-                    self._last_scheduled_end
-                    <= datetime.now()
-                    < self._last_scheduled_end + timedelta(minutes=15)
-                ):
+                now_dt = datetime.now()
+                buffer_end = self._last_scheduled_end + timedelta(minutes=15)
+                if self._last_scheduled_end <= now_dt < buffer_end:
+                    _LOGGER.warning(
+                        "🚨 Buffer Logic Override: Forcing charge because current time %s is "
+                        "within 15min buffer after last_scheduled_end %s",
+                        now_dt.strftime("%H:%M:%S"),
+                        self._last_scheduled_end.strftime("%H:%M:%S")
+                    )
                     plan["should_charge_now"] = True
                     plan["charging_summary"] = "Charging Buffer Active."
+                elif now_dt >= buffer_end and plan.get("scheduled_start"):
+                    # Clear old scheduled end if we're past the buffer
+                    _LOGGER.debug(
+                        "📍 Clearing old scheduled_end %s (now %s, buffer expired)",
+                        self._last_scheduled_end.strftime("%H:%M:%S"),
+                        now_dt.strftime("%H:%M:%S")
+                    )
+                    self._last_scheduled_end = None
 
             data.update(plan)
 
