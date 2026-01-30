@@ -54,6 +54,7 @@ from .const import (
     REFRESH_4_HOURS,
     REFRESH_AT_TARGET,
     ENTITY_TARGET_SOC,
+    ENTITY_MIN_SOC,
     ENTITY_DEPARTURE_TIME,
     ENTITY_DEPARTURE_OVERRIDE,
     ENTITY_SMART_SWITCH,
@@ -924,7 +925,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             # User settings from UI
             "user_settings": {
                 ENTITY_TARGET_SOC: self.user_settings.get(ENTITY_TARGET_SOC, 80),
-                ENTITY_MIN_SOC: self.user_settings.get("min_soc", 20),
+                ENTITY_MIN_SOC: self.user_settings.get(ENTITY_MIN_SOC, 20),
                 ENTITY_DEPARTURE_TIME: str(self.user_settings.get(ENTITY_DEPARTURE_TIME, time(7, 0))),
                 ENTITY_DEPARTURE_OVERRIDE: str(self.user_settings.get(ENTITY_DEPARTURE_OVERRIDE, time(7, 0))),
                 ENTITY_SMART_SWITCH: self.user_settings.get(ENTITY_SMART_SWITCH, True),
