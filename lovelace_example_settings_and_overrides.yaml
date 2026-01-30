@@ -4,7 +4,7 @@ cards:
     title: Settings
     entities:
       - entity: time.standard_departure_time
-      - entity: number.manual_target_soc
+      - entity: number.standard_target_soc
       - type: divider
       - entity: number.price_limit_low_cheap
       - entity: number.target_soc_at_low_price
