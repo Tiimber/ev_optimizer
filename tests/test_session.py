@@ -50,14 +50,14 @@ def test_persistence(pkg_loader):
     manager = session_mod.SessionManager(hass)
     
     manager.add_log("Test log")
-    manager.overload_prevention_minutes = 10.5
+    # Note: overload_prevention_minutes is no longer persisted (session-only)
     
     exported = manager.to_dict()
-    assert exported["overload_prevention_minutes"] == 10.5
+    assert "overload_prevention_minutes" not in exported  # Should not be persisted
     assert len(exported["action_log"]) == 1
     
     # Load into new manager
     manager2 = session_mod.SessionManager(hass)
     manager2.load_from_dict(exported)
-    assert manager2.overload_prevention_minutes == 10.5
+    assert manager2.overload_prevention_minutes == 0.0  # Starts fresh
     assert len(manager2.action_log) == 1
