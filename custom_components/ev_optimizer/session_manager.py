@@ -23,6 +23,8 @@ class SessionManager:
         self.last_session_data = None
         self.overload_prevention_minutes = 0.0
         self._was_charging_in_interval = False
+        self._last_log_message = None
+        self._last_log_time = None
     
     def load_from_dict(self, data: dict):
         """Load persisted state."""
@@ -42,8 +44,23 @@ class SessionManager:
         }
 
     def add_log(self, message: str):
-        """Add an entry to the action log and prune entries older than 24h."""
+        """Add an entry to the action log and prune entries older than 24h.
+        
+        Prevents duplicate messages within 5 minutes to reduce log spam.
+        """
         now = datetime.now()
+        
+        # Check if this is a duplicate of the last message within 5 minutes
+        if (self._last_log_message == message and 
+            self._last_log_time is not None and 
+            (now - self._last_log_time) < timedelta(minutes=5)):
+            # Skip duplicate log within 5-minute window
+            return
+        
+        # Update tracking for next call
+        self._last_log_message = message
+        self._last_log_time = now
+        
         timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
         entry = f"[{timestamp}] {message}"
         self.action_log.insert(0, entry)
