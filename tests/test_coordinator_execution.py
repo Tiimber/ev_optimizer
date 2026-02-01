@@ -109,11 +109,16 @@ def test_planner_says_wait_evening_charge_midnight(pkg_loader):
     # This test is covered by test_dump_charging_scenario.py
     # Here we just verify those tests exist and pass
     import subprocess
+    from pathlib import Path
+    
+    # Get the repo root (parent of tests/ directory)
+    repo_root = Path(__file__).parent.parent
+    
     result = subprocess.run(
         ["python3", "-m", "pytest", 
          "tests/test_dump_charging_scenario.py::test_jan_31_1828_dump_says_wait_for_midnight", 
          "-v"],
-        cwd="/workspaces/ev_smart_charger",
+        cwd=str(repo_root),
         capture_output=True, text=True
     )
     assert "PASSED" in result.stdout, (
@@ -129,9 +134,14 @@ def test_planner_reaches_80_percent_by_departure(pkg_loader):
     """
     # This test is covered by test_dump_charging_scenario.py
     import subprocess
+    from pathlib import Path
+    
+    # Get the repo root (parent of tests/ directory)
+    repo_root = Path(__file__).parent.parent
+    
     result = subprocess.run(
         ["python3", "-m", "pytest", "tests/test_dump_charging_scenario.py", "-v"],
-        cwd="/workspaces/ev_smart_charger",
+        cwd=str(repo_root),
         capture_output=True, text=True
     )
     assert "5 passed" in result.stdout, (
