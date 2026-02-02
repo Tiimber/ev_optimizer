@@ -478,11 +478,21 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             )
 
             # Handle Buffer Logic (stateful, so stays in coordinator)
+            # Update scheduled end when we're waiting to charge
             if not plan["should_charge_now"] and plan.get("session_end_time"):
                 self._last_scheduled_end = datetime.fromisoformat(
                     plan["session_end_time"]
                 )
+            
+            # Clear scheduled end when charging starts (otherwise it blocks future charges)
+            if plan["should_charge_now"] and self._last_scheduled_end:
+                _LOGGER.debug(
+                    "📍 Clearing scheduled_end %s because charging is now active",
+                    self._last_scheduled_end.strftime("%H:%M:%S")
+                )
+                self._last_scheduled_end = None
 
+            # Buffer logic: keep charging for 15min after scheduled end
             if not plan["should_charge_now"] and self._last_scheduled_end:
                 now_dt = datetime.now()
                 buffer_end = self._last_scheduled_end + timedelta(minutes=15)
@@ -495,7 +505,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                     )
                     plan["should_charge_now"] = True
                     plan["charging_summary"] = "Charging Buffer Active."
-                elif now_dt >= buffer_end and plan.get("scheduled_start"):
+                elif now_dt >= buffer_end:
                     # Clear old scheduled end if we're past the buffer
                     _LOGGER.debug(
                         "📍 Clearing old scheduled_end %s (now %s, buffer expired)",
