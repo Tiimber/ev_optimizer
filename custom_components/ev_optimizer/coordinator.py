@@ -134,6 +134,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         self._last_update_time = datetime.now()
         self._last_sensor_soc = None  # Track last raw sensor value to detect real updates
 
+        # Locked Plan: Lock plan once charging starts to prevent recalculation with stale SoC
+        self._locked_plan = None
+        self._locked_plan_soc = None  # SoC when plan was locked
+
         # New Flag: Tracks if user explicitly moved the Next Session slider
         self.manual_override_active = False
 
@@ -359,6 +363,9 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         if key == ENTITY_TARGET_OVERRIDE and not internal:
             self.manual_override_active = True
             self._add_log("Manual Override Mode Activated.")
+            # Clear locked plan when user manually changes target
+            self._locked_plan = None
+            self._locked_plan_soc = None
 
         self._save_data()
 
@@ -470,12 +477,45 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             # Get expected price arrival time from learning
             expected_price_time = self._get_expected_price_arrival_time()
 
-            plan = generate_charging_plan(
-                data, self.config_settings, self.manual_override_active, 
-                learning_state=self.learning_state, 
-                overload_prevention_minutes=self.session_manager.overload_prevention_minutes,
-                expected_price_time=expected_price_time
-            )
+            # Check if sensor SoC has actually updated (unlock plan if it has)
+            sensor_soc_updated = False
+            if self._last_sensor_soc is not None:
+                current_sensor = data.get("car_soc", 0.0)
+                if abs(current_sensor - self._last_sensor_soc) > 0.5:  # >0.5% change
+                    sensor_soc_updated = True
+                    _LOGGER.info(
+                        "🔓 SoC sensor updated (%.1f%% → %.1f%%), unlocking plan",
+                        self._last_sensor_soc, current_sensor
+                    )
+                    self._locked_plan = None
+                    self._locked_plan_soc = None
+
+            # Use locked plan if available and sensor hasn't updated
+            if self._locked_plan is not None and not sensor_soc_updated:
+                _LOGGER.debug(
+                    "🔒 Using locked plan (locked at %.1f%% SoC, current virtual: %.1f%%)",
+                    self._locked_plan_soc, self._virtual_soc
+                )
+                plan = self._locked_plan.copy()
+                # Update should_charge_now based on current time and schedule
+                plan = self._update_locked_plan_status(plan)
+            else:
+                # Generate new plan
+                plan = generate_charging_plan(
+                    data, self.config_settings, self.manual_override_active, 
+                    learning_state=self.learning_state, 
+                    overload_prevention_minutes=self.session_manager.overload_prevention_minutes,
+                    expected_price_time=expected_price_time
+                )
+                
+                # Lock the plan when charging starts for the first time
+                if plan["should_charge_now"] and self._locked_plan is None:
+                    self._locked_plan = plan.copy()
+                    self._locked_plan_soc = self._virtual_soc
+                    _LOGGER.info(
+                        "🔒 Locking charging plan at %.1f%% SoC (plan will remain stable until SoC updates)",
+                        self._locked_plan_soc
+                    )
 
             # Handle Buffer Logic (stateful, so stays in coordinator)
             # Update scheduled end when we're waiting to charge
@@ -821,6 +861,29 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         
         # Save state
         self._save_data()
+
+    def _update_locked_plan_status(self, locked_plan: dict) -> dict:
+        """Update should_charge_now in locked plan based on current time and schedule.
+        
+        This allows the locked plan to continue executing its charging schedule
+        without recalculating the entire plan.
+        """
+        now = datetime.now()
+        schedule = locked_plan.get("charging_schedule", [])
+        
+        # Check if current time is within any active charging slot
+        should_charge = False
+        for slot in schedule:
+            if not slot.get("active", False):
+                continue
+            slot_start = datetime.fromisoformat(slot["start"])
+            slot_end = datetime.fromisoformat(slot["end"])
+            if slot_start <= now < slot_end:
+                should_charge = True
+                break
+        
+        locked_plan["should_charge_now"] = should_charge
+        return locked_plan
 
     def _update_virtual_soc(self, data: dict):
         current_time = datetime.now()
@@ -1186,6 +1249,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             self._last_applied_amps = -1
             self._last_applied_car_limit = -1
             
+            # Clear locked plan for new session
+            self._locked_plan = None
+            self._locked_plan_soc = None
+            
             # If we missed a session finalization, it's too late now, start fresh.
             try:
                 # Reset inputs to defaults
@@ -1206,6 +1273,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         if not is_plugged and self.previous_plugged_state:
             self._finalize_session(final_soc=data.get("car_soc"))
             self.manual_override_active = False
+            
+            # Clear locked plan when car unplugs
+            self._locked_plan = None
+            self._locked_plan_soc = None
 
             std_time = self.user_settings.get(ENTITY_DEPARTURE_TIME, time(7, 0))
             self.set_user_input(ENTITY_DEPARTURE_OVERRIDE, std_time, internal=True)
