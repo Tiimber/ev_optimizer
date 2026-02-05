@@ -42,9 +42,17 @@ class EVDepartureTime(CoordinatorEntity, TimeEntity):
         super().__init__(coordinator)
 
     @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return True
+
+    @property
     def native_value(self) -> time:
         """Return the current value from the coordinator data."""
-        return self.coordinator.data.get(ENTITY_DEPARTURE_TIME, time(7, 0))
+        if not self.coordinator.data:
+            return time(7, 0)
+        value = self.coordinator.data.get(ENTITY_DEPARTURE_TIME)
+        return value if value is not None else time(7, 0)
 
     async def async_set_value(self, value: time) -> None:
         """Update the time."""
@@ -62,6 +70,11 @@ class EVDepartureOverride(CoordinatorEntity, TimeEntity):
     def __init__(self, coordinator):
         """Initialize the override entity."""
         super().__init__(coordinator)
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return True
 
     @property
     def native_value(self) -> time:
@@ -88,6 +101,11 @@ class EVDebugCurrentTime(CoordinatorEntity, TimeEntity):
         super().__init__(coordinator)
 
     @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return True
+
+    @property
     def native_value(self) -> time | None:
         """Return the current value from the coordinator data."""
         value = self.coordinator.data.get(ENTITY_DEBUG_CURRENT_TIME)
@@ -110,6 +128,11 @@ class EVDebugDepartureTime(CoordinatorEntity, TimeEntity):
     def __init__(self, coordinator):
         """Initialize the debug time entity."""
         super().__init__(coordinator)
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return True
 
     @property
     def native_value(self) -> time | None:
