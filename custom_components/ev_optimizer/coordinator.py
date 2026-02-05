@@ -165,21 +165,16 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         def get_conf(key, default=None):
             return entry.options.get(key, entry.data.get(key, default))
 
-        # Initialize user_settings with default values from configuration
+        # Initialize user_settings with default values
         # These will be overwritten by persisted values in _load_data if they exist
-        departure_time_str = get_conf(ENTITY_DEPARTURE_TIME, DEFAULT_DEPARTURE_TIME)
-        try:
-            parts = departure_time_str.split(":")
-            self.user_settings[ENTITY_DEPARTURE_TIME] = time(int(parts[0]), int(parts[1]))
-        except:
-            self.user_settings[ENTITY_DEPARTURE_TIME] = time(7, 0)
-        
-        self.user_settings[ENTITY_TARGET_SOC] = get_conf(ENTITY_TARGET_SOC, DEFAULT_TARGET_SOC)
-        self.user_settings[ENTITY_MIN_SOC] = get_conf(ENTITY_MIN_SOC, DEFAULT_MIN_SOC)
-        self.user_settings[ENTITY_PRICE_LIMIT_1] = get_conf(ENTITY_PRICE_LIMIT_1, DEFAULT_PRICE_LIMIT_1)
-        self.user_settings[ENTITY_TARGET_SOC_1] = get_conf(ENTITY_TARGET_SOC_1, DEFAULT_TARGET_SOC_1)
-        self.user_settings[ENTITY_PRICE_LIMIT_2] = get_conf(ENTITY_PRICE_LIMIT_2, DEFAULT_PRICE_LIMIT_2)
-        self.user_settings[ENTITY_TARGET_SOC_2] = get_conf(ENTITY_TARGET_SOC_2, DEFAULT_TARGET_SOC_2)
+        # NOTE: Do NOT read these from entry.data/options - they are user settings, not config!
+        self.user_settings[ENTITY_DEPARTURE_TIME] = time(7, 0)
+        self.user_settings[ENTITY_TARGET_SOC] = DEFAULT_TARGET_SOC
+        self.user_settings[ENTITY_MIN_SOC] = DEFAULT_MIN_SOC
+        self.user_settings[ENTITY_PRICE_LIMIT_1] = DEFAULT_PRICE_LIMIT_1
+        self.user_settings[ENTITY_TARGET_SOC_1] = DEFAULT_TARGET_SOC_1
+        self.user_settings[ENTITY_PRICE_LIMIT_2] = DEFAULT_PRICE_LIMIT_2
+        self.user_settings[ENTITY_TARGET_SOC_2] = DEFAULT_TARGET_SOC_2
 
         # Config Variables passed to planner
         self.config_settings = {
