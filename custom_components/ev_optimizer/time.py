@@ -66,7 +66,7 @@ class EVDepartureTime(CoordinatorEntity, TimeEntity):
     async def async_set_value(self, value: time) -> None:
         """Update the time."""
         self.coordinator.set_user_input(ENTITY_DEPARTURE_TIME, value)
-        self.async_write_ha_state()
+        # Coordinator refresh will update all entities
 
 class EVDepartureOverride(CoordinatorEntity, TimeEntity):
     """Time entity for overriding the next session's departure time."""
@@ -115,7 +115,7 @@ class EVDepartureOverride(CoordinatorEntity, TimeEntity):
     async def async_set_value(self, value: time) -> None:
         """Update the override time."""
         self.coordinator.set_user_input(ENTITY_DEPARTURE_OVERRIDE, value)
-        self.async_write_ha_state()
+        # Coordinator refresh will update all entities
 
 class EVDebugCurrentTime(CoordinatorEntity, TimeEntity):
     """Debug entity for custom simulation - current time."""
@@ -154,7 +154,7 @@ class EVDebugCurrentTime(CoordinatorEntity, TimeEntity):
     async def async_set_value(self, value: time) -> None:
         """Update the time."""
         self.coordinator.set_user_input(ENTITY_DEBUG_CURRENT_TIME, value)
-        self.async_write_ha_state()
+        # Coordinator refresh will update all entities
 
 class EVDebugDepartureTime(CoordinatorEntity, TimeEntity):
     """Debug entity for custom simulation - departure time."""
@@ -193,4 +193,4 @@ class EVDebugDepartureTime(CoordinatorEntity, TimeEntity):
     async def async_set_value(self, value: time) -> None:
         """Update the time."""
         self.coordinator.set_user_input(ENTITY_DEBUG_DEPARTURE_TIME, value)
-        self.async_write_ha_state()
+        # Coordinator refresh will update all entities
