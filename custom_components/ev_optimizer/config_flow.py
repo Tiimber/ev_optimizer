@@ -243,7 +243,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     default=defaults.get(CONF_CAR_REFRESH_ACTION),
                 ): TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT)),
                 # Use explicit labels here
-                vol.Optional(
+                vol.Required(
                     CONF_CAR_REFRESH_INTERVAL,
                     default=defaults.get(CONF_CAR_REFRESH_INTERVAL, REFRESH_NEVER),
                 ): SelectSelector(
@@ -452,7 +452,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            # Merge with existing options to preserve other settings
+            new_options = {**self._config_entry.options, **user_input}
+            return self.async_create_entry(title="", data=new_options)
         current_config = {**self._config_entry.data, **self._config_entry.options}
         return self.async_show_form(
             step_id="charger",
@@ -463,7 +465,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            # Merge with existing options to preserve other settings
+            new_options = {**self._config_entry.options, **user_input}
+            return self.async_create_entry(title="", data=new_options)
         current_config = {**self._config_entry.data, **self._config_entry.options}
         return self.async_show_form(
             step_id="car", data_schema=ConfigFlow._get_car_schema(current_config)
@@ -473,7 +477,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            # Merge with existing options to preserve other settings
+            new_options = {**self._config_entry.options, **user_input}
+            return self.async_create_entry(title="", data=new_options)
         current_config = {**self._config_entry.data, **self._config_entry.options}
         return self.async_show_form(
             step_id="meter", data_schema=ConfigFlow._get_meter_schema(current_config)
@@ -483,7 +489,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            # Merge with existing options to preserve other settings
+            new_options = {**self._config_entry.options, **user_input}
+            return self.async_create_entry(title="", data=new_options)
         current_config = {**self._config_entry.data, **self._config_entry.options}
         return self.async_show_form(
             step_id="price_calendar",
@@ -494,7 +502,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            # Merge with existing options to preserve other settings
+            new_options = {**self._config_entry.options, **user_input}
+            return self.async_create_entry(title="", data=new_options)
         current_config = {**self._config_entry.data, **self._config_entry.options}
         return self.async_show_form(
             step_id="planning",
