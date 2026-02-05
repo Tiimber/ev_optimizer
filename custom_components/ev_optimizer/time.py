@@ -90,7 +90,9 @@ class EVDebugCurrentTime(CoordinatorEntity, TimeEntity):
     @property
     def native_value(self) -> time | None:
         """Return the current value from the coordinator data."""
-        return self.coordinator.data.get(ENTITY_DEBUG_CURRENT_TIME)
+        value = self.coordinator.data.get(ENTITY_DEBUG_CURRENT_TIME)
+        # Return midnight if not set (debug entities need a value to be considered "provided")
+        return value if value is not None else time(0, 0)
 
     async def async_set_value(self, value: time) -> None:
         """Update the time."""
@@ -112,7 +114,9 @@ class EVDebugDepartureTime(CoordinatorEntity, TimeEntity):
     @property
     def native_value(self) -> time | None:
         """Return the current value from the coordinator data."""
-        return self.coordinator.data.get(ENTITY_DEBUG_DEPARTURE_TIME)
+        value = self.coordinator.data.get(ENTITY_DEBUG_DEPARTURE_TIME)
+        # Return 7:00 if not set (debug entities need a value to be considered "provided")
+        return value if value is not None else time(7, 0)
 
     async def async_set_value(self, value: time) -> None:
         """Update the time."""
