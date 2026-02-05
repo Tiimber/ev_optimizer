@@ -381,7 +381,21 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 value_str = value.strftime("%H:%M")
             else:
                 value_str = str(value)
-            self._add_log(f"User setting changed: {key} -> {value_str}")
+            
+            # Use friendly names in log
+            friendly_names = {
+                ENTITY_DEPARTURE_TIME: "Standard Departure Time",
+                ENTITY_DEPARTURE_OVERRIDE: "Next Session Departure",
+                ENTITY_TARGET_SOC: "Target SoC",
+                ENTITY_MIN_SOC: "Minimum SoC",
+                ENTITY_PRICE_LIMIT_1: "Price Limit 1",
+                ENTITY_TARGET_SOC_1: "Target SoC 1",
+                ENTITY_PRICE_LIMIT_2: "Price Limit 2",
+                ENTITY_TARGET_SOC_2: "Target SoC 2",
+                ENTITY_TARGET_OVERRIDE: "Next Session Target SoC",
+            }
+            friendly_key = friendly_names.get(key, key)
+            self._add_log(f"{friendly_key} changed to {value_str}")
 
         if key == ENTITY_TARGET_OVERRIDE and not internal:
             self.manual_override_active = True
