@@ -377,11 +377,16 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
     def set_user_input(self, key: str, value, internal: bool = False):
         """Update a user setting from the UI."""
-        _LOGGER.debug(f"Setting user input: {key} = {value}")
+        _LOGGER.debug(f"Setting user input: {key} = {value} (type: {type(value)})")
         self.user_settings[key] = value
 
         if not internal:
-            self._add_log(f"User setting changed: {key} -> {value}")
+            # Format time objects properly for logging
+            if isinstance(value, time):
+                value_str = value.strftime("%H:%M")
+            else:
+                value_str = str(value)
+            self._add_log(f"User setting changed: {key} -> {value_str}")
 
         if key == ENTITY_TARGET_OVERRIDE and not internal:
             self.manual_override_active = True

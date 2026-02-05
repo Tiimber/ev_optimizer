@@ -88,9 +88,9 @@ class EVDebugCurrentTime(CoordinatorEntity, TimeEntity):
         super().__init__(coordinator)
 
     @property
-    def native_value(self) -> time:
+    def native_value(self) -> time | None:
         """Return the current value from the coordinator data."""
-        return self.coordinator.data.get(ENTITY_DEBUG_CURRENT_TIME, time(0, 0))
+        return self.coordinator.data.get(ENTITY_DEBUG_CURRENT_TIME)
 
     async def async_set_value(self, value: time) -> None:
         """Update the time."""
@@ -110,9 +110,9 @@ class EVDebugDepartureTime(CoordinatorEntity, TimeEntity):
         super().__init__(coordinator)
 
     @property
-    def native_value(self) -> time:
+    def native_value(self) -> time | None:
         """Return the current value from the coordinator data."""
-        return self.coordinator.data.get(ENTITY_DEBUG_DEPARTURE_TIME, time(7, 0))
+        return self.coordinator.data.get(ENTITY_DEBUG_DEPARTURE_TIME)
 
     async def async_set_value(self, value: time) -> None:
         """Update the time."""
