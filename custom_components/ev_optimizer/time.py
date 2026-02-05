@@ -52,7 +52,16 @@ class EVDepartureTime(CoordinatorEntity, TimeEntity):
         if not self.coordinator.data:
             return time(7, 0)
         value = self.coordinator.data.get(ENTITY_DEPARTURE_TIME)
-        return value if value is not None else time(7, 0)
+        if value is None:
+            return time(7, 0)
+        # Convert string to time if needed
+        if isinstance(value, str):
+            try:
+                parts = value.split(":")
+                return time(int(parts[0]), int(parts[1]))
+            except:
+                return time(7, 0)
+        return value
 
     async def async_set_value(self, value: time) -> None:
         """Update the time."""
@@ -79,9 +88,29 @@ class EVDepartureOverride(CoordinatorEntity, TimeEntity):
     @property
     def native_value(self) -> time:
         """Return the current value from the coordinator data."""
-        # Default to the Standard time if no override is currently active
+        if not self.coordinator.data:
+            return time(7, 0)
+        # Get override value
+        override = self.coordinator.data.get(ENTITY_DEPARTURE_OVERRIDE)
+        if override is not None:
+            # Convert string to time if needed
+            if isinstance(override, str):
+                try:
+                    parts = override.split(":")
+                    return time(int(parts[0]), int(parts[1]))
+                except:
+                    pass
+            elif isinstance(override, time):
+                return override
+        # Fall back to standard departure time
         std_time = self.coordinator.data.get(ENTITY_DEPARTURE_TIME, time(7, 0))
-        return self.coordinator.data.get(ENTITY_DEPARTURE_OVERRIDE, std_time)
+        if isinstance(std_time, str):
+            try:
+                parts = std_time.split(":")
+                return time(int(parts[0]), int(parts[1]))
+            except:
+                return time(7, 0)
+        return std_time if isinstance(std_time, time) else time(7, 0)
 
     async def async_set_value(self, value: time) -> None:
         """Update the override time."""
@@ -108,9 +137,19 @@ class EVDebugCurrentTime(CoordinatorEntity, TimeEntity):
     @property
     def native_value(self) -> time | None:
         """Return the current value from the coordinator data."""
+        if not self.coordinator.data:
+            return time(0, 0)
         value = self.coordinator.data.get(ENTITY_DEBUG_CURRENT_TIME)
-        # Return midnight if not set (debug entities need a value to be considered "provided")
-        return value if value is not None else time(0, 0)
+        if value is None:
+            return time(0, 0)
+        # Convert string to time if needed
+        if isinstance(value, str):
+            try:
+                parts = value.split(":")
+                return time(int(parts[0]), int(parts[1]))
+            except:
+                return time(0, 0)
+        return value
 
     async def async_set_value(self, value: time) -> None:
         """Update the time."""
@@ -137,9 +176,19 @@ class EVDebugDepartureTime(CoordinatorEntity, TimeEntity):
     @property
     def native_value(self) -> time | None:
         """Return the current value from the coordinator data."""
+        if not self.coordinator.data:
+            return time(7, 0)
         value = self.coordinator.data.get(ENTITY_DEBUG_DEPARTURE_TIME)
-        # Return 7:00 if not set (debug entities need a value to be considered "provided")
-        return value if value is not None else time(7, 0)
+        if value is None:
+            return time(7, 0)
+        # Convert string to time if needed
+        if isinstance(value, str):
+            try:
+                parts = value.split(":")
+                return time(int(parts[0]), int(parts[1]))
+            except:
+                return time(7, 0)
+        return value
 
     async def async_set_value(self, value: time) -> None:
         """Update the time."""
