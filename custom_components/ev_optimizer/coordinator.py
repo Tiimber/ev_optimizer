@@ -643,37 +643,61 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             should_refresh = True
         elif interval_mode == REFRESH_AT_TARGET:
             # Smart refresh mode with learning
-            should_refresh = self._should_trigger_smart_refresh(plan, delta)
+            should_refresh, trigger_learning = self._should_trigger_smart_refresh(plan, delta)
+            if should_refresh:
+                await self._trigger_car_refresh(svc, ent, trigger_learning=trigger_learning)
+            return
 
         if should_refresh:
-            await self._trigger_car_refresh(svc, ent)
+            await self._trigger_car_refresh(svc, ent, trigger_learning=False)
 
-    def _should_trigger_smart_refresh(self, plan: dict, time_since_last: timedelta) -> bool:
-        """Determine if smart refresh should be triggered for efficiency learning."""
+    def _should_trigger_smart_refresh(self, plan: dict, time_since_last: timedelta) -> tuple[bool, bool]:
+        """Determine if smart refresh should be triggered for efficiency learning.
+        
+        Returns:
+            tuple[bool, bool]: (should_refresh, trigger_learning)
+        """
         # Only for smart refresh mode
         if not self.session_manager.current_session:
-            return False  # Not charging
+            return (False, False)  # Not charging
         
         planned_end = plan.get("session_end_time")
         if not planned_end:
-            # Fallback: refresh if at target and time has passed
+            # Fallback: refresh if at target and time has passed (but no learning)
             if self._virtual_soc >= float(plan.get("planned_target_soc", 80)):
-                return time_since_last > timedelta(hours=12)
-            return False
+                if time_since_last > timedelta(hours=12):
+                    return (True, False)  # Refresh but no learning
+            return (False, False)
         
         # Parse session_end_time if it's a string
         if isinstance(planned_end, str):
             try:
                 planned_end = datetime.fromisoformat(planned_end)
             except Exception:
-                return False
+                return (False, False)
         
         now = datetime.now()
+        session_start_str = self.session_manager.current_session.get("start_time")
+        if session_start_str:
+            session_start = datetime.fromisoformat(session_start_str) if isinstance(session_start_str, str) else session_start_str
+            session_duration_minutes = (planned_end - session_start).total_seconds() / 60
+        else:
+            session_duration_minutes = 0
+        
         time_to_end_minutes = (planned_end - now).total_seconds() / 60
         
         # Don't refresh if session hasn't started or already ended
         if time_to_end_minutes < 0 or time_to_end_minutes > 300:  # More than 5 hours
-            return False
+            return (False, False)
+        
+        # Only do learning if session is at least 60 minutes
+        if session_duration_minutes < 60:
+            _LOGGER.debug("📊 Skipping learning: session too short (%.0f min)", session_duration_minutes)
+            # Still refresh at target if needed, but no learning
+            if self._virtual_soc >= float(plan.get("planned_target_soc", 80)):
+                if time_since_last > timedelta(hours=1):
+                    return (True, False)
+            return (False, False)
         
         sessions = self.learning_state.get(LEARNING_SESSIONS, 0)
         locked = self.learning_state.get(LEARNING_LOCKED, False)
@@ -695,35 +719,33 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             minutes_since_last = (now - last_refresh).total_seconds() / 60
         
         if locked or sessions >= 10:
-            # Locked phase: single refresh near completion
-            if 0 < time_to_end_minutes <= 5 and minutes_since_last > 5:
-                _LOGGER.debug("📊 Locked: Final refresh at completion")
-                return True
+            # Locked phase: single refresh 30min before completion for verification
+            if 25 < time_to_end_minutes <= 35 and minutes_since_last > 30:
+                _LOGGER.debug("📊 Locked: Refresh 30min before end for verification")
+                return (True, True)  # Refresh WITH learning
         else:
-            # Learning phase: multiple measurement points
-            if time_to_end_minutes > 55 and time_to_end_minutes <= 65 and minutes_since_last > 30:
-                _LOGGER.debug("📊 Learning: Measurement #1 (60min before end)")
-                return True
-            elif 25 < time_to_end_minutes <= 35 and minutes_since_last > 15:
-                _LOGGER.debug("📊 Learning: Measurement #2 (30min before end)")
-                return True
-            elif 0 < time_to_end_minutes <= 5 and minutes_since_last > 5:
-                _LOGGER.debug("📊 Learning: Final measurement")
-                return True
+            # Learning phase: refresh 30min before end WITH learning
+            if 25 < time_to_end_minutes <= 35 and minutes_since_last > 30:
+                _LOGGER.debug("📊 Learning: Refresh 30min before end")
+                return (True, True)  # Refresh WITH learning
         
-        return False
+        # If we're at target SoC and haven't refreshed recently, do it (but no learning)
+        if self._virtual_soc >= float(plan.get("planned_target_soc", 80)):
+            if time_since_last > timedelta(hours=1):
+                _LOGGER.debug("📊 Target reached: Refresh for confirmation (no learning)")
+                return (True, False)  # Refresh but NO learning
+        
+        return (False, False)
 
-    async def _trigger_car_refresh(self, service: str, entity_id: str):
+    async def _trigger_car_refresh(self, service: str, entity_id: str, trigger_learning: bool = False):
         try:
-            state = self.hass.states.get(self.conf_keys["car_soc"])
-            val = (
-                float(state.state)
-                if state and state.state not in [STATE_UNAVAILABLE, STATE_UNKNOWN]
-                else 0.0
-            )
-            self._soc_before_refresh = val
-
-            self._add_log(f"Forcing Car Refresh (Current: {val}%)")
+            # Store virtual SoC BEFORE refresh to compare with actual after (if learning)
+            if trigger_learning:
+                self._soc_before_refresh = self._virtual_soc
+                self._add_log(f"Forcing Car Refresh for Learning (Virtual SoC: {self._virtual_soc:.1f}%)")
+            else:
+                self._add_log(f"Forcing Car Refresh (Virtual SoC: {self._virtual_soc:.1f}%)")
+            
             domain, name = service.split(".", 1)
 
             payload = {}
@@ -737,85 +759,55 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             self._last_car_refresh_time = refresh_time
             self._refresh_trigger_timestamp = refresh_time
             
-            # Record refresh time for learning and schedule evaluation
-            interval_mode = self.conf_keys.get("refresh_int", REFRESH_NEVER)
-            if interval_mode == REFRESH_AT_TARGET and self.session_manager.current_session:
-                self.learning_state[LEARNING_LAST_REFRESH] = refresh_time.isoformat()
-                # Schedule evaluation after a short delay to allow SoC to update
-                self.hass.async_create_task(self._evaluate_efficiency_after_delay(refresh_time))
+            # Only schedule learning evaluation if this is a learning refresh
+            if trigger_learning:
+                interval_mode = self.conf_keys.get("refresh_int", REFRESH_NEVER)
+                if interval_mode == REFRESH_AT_TARGET and self.session_manager.current_session:
+                    self.learning_state[LEARNING_LAST_REFRESH] = refresh_time.isoformat()
+                    # Schedule evaluation after a delay to allow SoC to update
+                    self.hass.async_create_task(self._evaluate_efficiency_after_delay(refresh_time))
         except Exception as e:
             _LOGGER.error(f"Failed to force refresh car: {e}")
 
     async def _evaluate_efficiency_after_delay(self, refresh_time: datetime):
         """Wait for SoC to update, then evaluate efficiency learning."""
-        # Wait 10 seconds for car SoC to update after refresh
-        await asyncio.sleep(10)
+        # Wait 30 seconds for car SoC to update after refresh
+        await asyncio.sleep(30)
         await self._evaluate_efficiency_learning(refresh_time)
 
     async def _evaluate_efficiency_learning(self, refresh_time: datetime):
         """Evaluate and adjust learned efficiency after a measurement point."""
         
-        # Get current state
-        actual_soc = self.data.get("car_soc", 0)
+        # Get actual SoC after refresh
+        state = self.hass.states.get(self.conf_keys["car_soc"])
+        actual_soc = (
+            float(state.state)
+            if state and state.state not in [STATE_UNAVAILABLE, STATE_UNKNOWN]
+            else 0.0
+        )
+        
         if actual_soc == 0:
-            _LOGGER.debug("📊 Skipping learning evaluation: SoC is 0 (sensor unavailable)")
+            _LOGGER.debug("📊 Skipping learning evaluation: SoC sensor unavailable")
             return
         
-        planned_target = self.data.get("planned_target_soc", 80)
-        
-        # Get session data
-        session = self.session_manager.current_session
-        if not session:
-            _LOGGER.debug("📊 Skipping learning evaluation: No active session")
+        # Get the virtual SoC we had BEFORE the refresh
+        expected_soc = self._soc_before_refresh
+        if expected_soc is None or expected_soc == 0:
+            _LOGGER.debug("📊 Skipping learning evaluation: No virtual SoC recorded before refresh")
             return
         
-        charge_start_soc = session.get("start_soc", actual_soc)
-        charge_start_time_str = session.get("start_time")
-        if not charge_start_time_str:
-            _LOGGER.debug("📊 Skipping learning evaluation: No session start time")
-            return
-        
-        # Parse start time
-        if isinstance(charge_start_time_str, str):
-            charge_start_time = datetime.fromisoformat(charge_start_time_str)
-        else:
-            charge_start_time = charge_start_time_str
-        
-        time_elapsed_hours = (refresh_time - charge_start_time).total_seconds() / 3600
-        
-        # Get overload prevention minutes
-        overload_minutes = self.session_manager.overload_prevention_minutes
-        effective_charge_hours = time_elapsed_hours - (overload_minutes / 60.0)
-        
-        if effective_charge_hours <= 0:
-            _LOGGER.debug("📊 Skipping learning evaluation: No effective charge time yet")
-            return
-        
-        # Calculate expected SoC based on energy delivered
-        battery_kwh = self.config_settings.get("car_capacity", 64.0)
-        max_fuse = self.config_settings.get("max_fuse", 20.0)
-        
-        # Estimate charging power (simplified - assumes 3-phase at 230V)
-        charging_power_kw = min((3 * 230 * max_fuse) / 1000.0, 11.0)
-        
-        current_loss = self.learning_state.get(LEARNING_CHARGER_LOSS, 0.0)
-        efficiency = 1.0 - (current_loss / 100.0)
-        
-        # Expected energy into battery
-        expected_energy_kwh = charging_power_kw * effective_charge_hours * efficiency
-        expected_soc = charge_start_soc + (expected_energy_kwh / battery_kwh * 100)
-        
-        # Calculate error
+        # Calculate error: positive = actual higher than expected (less loss), negative = lower (more loss)
         soc_error = actual_soc - expected_soc
         
         _LOGGER.info(
-            "📊 Efficiency measurement: expected %.1f%%, actual %.1f%%, error %.1f%% (charged %.1fh)",
-            expected_soc, actual_soc, soc_error, effective_charge_hours
+            "📊 Efficiency measurement: virtual SoC was %.1f%%, actual SoC is %.1f%%, error %.1f%%",
+            expected_soc, actual_soc, soc_error
         )
         
-        # Determine adjustment
+        # Get session for logging
         sessions = self.learning_state.get(LEARNING_SESSIONS, 0)
         confidence = self.learning_state.get(LEARNING_CONFIDENCE, 0)
+        current_loss = self.learning_state.get(LEARNING_CHARGER_LOSS, 0.0)
         
         # Margin of error (tighter as we learn)
         if confidence < 3:
@@ -831,7 +823,8 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         if abs(soc_error) <= margin:
             # Within acceptable range
             confidence += 1
-            reason = f"Within {margin}% margin, confidence increased"
+            sessions += 1
+            reason = f"Within {margin:.1f}% margin, confidence increased"
         elif soc_error < -margin:
             # Actual LOWER than expected - we're losing more energy than thought
             # Need to INCREASE loss percentage
@@ -842,6 +835,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             
             current_loss += adjustment
             confidence = max(0, confidence - 1)
+            sessions += 1
             reason = f"Underperforming by {abs(soc_error):.1f}%, increasing loss"
             
         elif soc_error > margin:
@@ -854,6 +848,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             
             current_loss += adjustment
             confidence = max(0, confidence - 1)
+            sessions += 1
             reason = f"Outperforming by {soc_error:.1f}%, decreasing loss"
         
         # Apply bounds
@@ -868,6 +863,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         self.learning_state.update({
             LEARNING_CHARGER_LOSS: current_loss,
             LEARNING_CONFIDENCE: min(10, confidence),
+            LEARNING_SESSIONS: sessions,
             LEARNING_LOCKED: locked,
         })
         
@@ -892,8 +888,8 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         )
         
         _LOGGER.info(
-            "🎓 Learning result: loss=%.1f%%, confidence=%d/10, locked=%s - %s",
-            current_loss, confidence, locked, reason
+            "🎓 Learning result: loss=%.1f%%, confidence=%d/10, sessions=%d, locked=%s - %s",
+            current_loss, confidence, sessions, locked, reason
         )
         
         # Save state
