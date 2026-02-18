@@ -156,6 +156,8 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         self._debounce_unsub = None
         self._last_p1_update = datetime.min
 
+        # Overload prevention tracking
+        self._last_overload_check_time = None
 
         # Persistence
         self.store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
@@ -621,6 +623,14 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
         if not svc or not ent or interval_mode == REFRESH_NEVER:
             return
+        
+        # CRITICAL: Force refresh when first entering maintenance mode to get accurate final SoC
+        # This prevents graph dips from stale sensor values
+        maintenance_now = "Maintenance mode active" in plan.get("charging_summary", "")
+        if maintenance_now and self._last_applied_state == "charging":
+            _LOGGER.debug("📊 Entering maintenance mode - triggering immediate refresh for final SoC")
+            await self._trigger_car_refresh(svc, ent, trigger_learning=False)
+            return
 
         now = datetime.now()
 
@@ -947,7 +957,9 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             except (TypeError, ValueError):
                 sensor_soc_f = None
 
-        actively_charging = self._last_applied_state == "charging"
+        # Treat both "charging" and "maintenance" as actively connected (car plugged in)
+        # Don't trust stale downward sensor movements in either state
+        actively_charging = self._last_applied_state in ("charging", "maintenance")
         
         # Check if sensor value actually changed (indicating a real update from the car)
         sensor_value_changed = (
@@ -957,7 +969,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         )
         
         if sensor_soc_f is not None:
-            # During active charging: only trust sensor when:
+            # During active charging/maintenance: only trust sensor when:
             # 1. It's a forced refresh window, OR
             # 2. The sensor value actually changed (real update from car), OR
             # 3. Virtual SoC is uninitialized
@@ -966,10 +978,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 if trust_sensor_period or sensor_value_changed or self._virtual_soc == 0.0:
                     self._virtual_soc = sensor_soc_f
                     _LOGGER.debug(
-                        f"Virtual SoC updated to {sensor_soc_f:.1f}% during charging "
+                        f"Virtual SoC updated to {sensor_soc_f:.1f}% while plugged in "
                         f"(forced_refresh={trust_sensor_period}, value_changed={sensor_value_changed})"
                     )
-                # else: ignore unchanged sensor value during charging; rely purely on virtual estimator
+                # else: ignore unchanged sensor value while plugged in; rely purely on virtual estimator
             else:
                 # When not charging: always trust sensor (could be driven, charged elsewhere, etc.)
                 # Follow sensor upwards, downwards, or on first reading
@@ -1036,9 +1048,18 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                     self._add_log(
                         f"Safety Cutoff: Available {safe_amps}A is below minimum 6A. Pausing."
                     )
-                    # Track minutes lost to overload prevention (30 second update interval)
-                    self.session_manager.add_overload_minutes(0.5)
+                    # Track actual minutes lost to overload prevention
+                    # (handles variable update intervals from P1 listener triggers)
+                    now = datetime.now()
+                    if self._last_overload_check_time is not None:
+                        elapsed_seconds = (now - self._last_overload_check_time).total_seconds()
+                        elapsed_minutes = elapsed_seconds / 60.0
+                        self.session_manager.add_overload_minutes(elapsed_minutes)
+                    self._last_overload_check_time = now
                 should_charge = False
+            else:
+                # Reset the overload check timer when not in overload state
+                self._last_overload_check_time = None
 
             target_amps = safe_amps if should_charge else 0
             desired_state = "charging" if should_charge else "paused"
@@ -1095,7 +1116,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                             "CHARGING" if target_amps > 0 else "MAINTENANCE (0A)"
                         )
                         self._add_log(f"Switched Charging state to: {state_msg}")
-                        self._add_log(f"Setting charger to {target_amps}A")
+                        self._add_log(f"Setting charger to {int(target_amps)}A")
                     elif self.conf_keys.get("zap_resume"):
                         await self.hass.services.async_call(
                             "button",
@@ -1104,7 +1125,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                             blocking=True,
                         )
                         self._add_log("Sent Resume command")
-                        self._add_log(f"Setting charger to {target_amps}A")
+                        self._add_log(f"Setting charger to {int(target_amps)}A")
                     self._last_applied_state = desired_state
                 except Exception as e:
                     _LOGGER.error(f"Failed to switch Zaptec state to CHARGING: {e}")
@@ -1134,7 +1155,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                     self._last_applied_amps = target_amps
                     if target_amps > 0:
                         self._add_log(
-                            f"Adjusted charger to {target_amps}A (Load Balancing)"
+                            f"Adjusted charger to {int(target_amps)}A (Load Balancing)"
                         )
                 except Exception as e:
                     _LOGGER.error(f"Failed to set Zaptec limit: {e}")
@@ -1286,6 +1307,9 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             self._locked_plan = None
             self._locked_plan_soc = None
             
+            # Reset overload prevention timer for new session
+            self._last_overload_check_time = None
+            
             # If we missed a session finalization, it's too late now, start fresh.
             try:
                 # Reset inputs to defaults
@@ -1310,6 +1334,9 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             # Clear locked plan when car unplugs
             self._locked_plan = None
             self._locked_plan_soc = None
+            
+            # Reset overload prevention timer
+            self._last_overload_check_time = None
 
             std_time = self.user_settings.get(ENTITY_DEPARTURE_TIME, time(7, 0))
             self.set_user_input(ENTITY_DEPARTURE_OVERRIDE, std_time, internal=True)
