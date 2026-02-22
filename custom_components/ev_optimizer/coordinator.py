@@ -531,6 +531,14 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
             # Use locked plan if available and sensor hasn't updated
             if self._locked_plan is not None and not sensor_soc_updated:
+                # Unlock if the locked plan is waiting for prices (should regenerate)
+                locked_is_waiting = "Waiting for additional price data" in self._locked_plan.get("charging_summary", "")
+                if locked_is_waiting:
+                    _LOGGER.info("🔓 Locked plan is waiting for prices - unlocking to regenerate")
+                    self._locked_plan = None
+                    self._locked_plan_soc = None
+
+            if self._locked_plan is not None and not sensor_soc_updated:
                 _LOGGER.debug(
                     "🔒 Using locked plan (locked at %.1f%% SoC, current virtual: %.1f%%)",
                     self._locked_plan_soc, self._virtual_soc
@@ -548,7 +556,9 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 )
                 
                 # Lock the plan when charging starts for the first time
-                if plan["should_charge_now"] and self._locked_plan is None:
+                # BUT: Don't lock "waiting for prices" plans - they need to be regenerated when prices arrive
+                is_waiting_for_prices = "Waiting for additional price data" in plan.get("charging_summary", "")
+                if plan["should_charge_now"] and self._locked_plan is None and not is_waiting_for_prices:
                     self._locked_plan = plan.copy()
                     self._locked_plan_soc = self._virtual_soc
                     _LOGGER.info(

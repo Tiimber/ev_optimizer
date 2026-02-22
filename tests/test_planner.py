@@ -441,3 +441,127 @@ def test_does_not_wait_for_additional_price_data_when_time_is_tight():
     plan = planner.generate_charging_plan(data, config, manual_override=False, now=now)
     assert plan["should_charge_now"] is True
 
+
+def test_calendar_event_too_far_in_future_uses_default_time():
+    """When calendar event is more than 1 day in the future, planner should
+    ignore it and use the default departure time for tomorrow.
+    """
+    now = datetime(2026, 2, 22, 12, 0)  # Feb 22 noon
+    # Calendar event on Feb 24 (2 days from now) - should be ignored
+    calendar_event_feb24 = datetime(2026, 2, 24, 8, 30).isoformat()
+    
+    # Quarter-hour prices for today
+    feb22_prices = make_price_list(length=96, base=1.0, low_indices=[0, 1, 2, 3], low_value=0.5)
+    
+    data = {
+        "price_data": {"today": feb22_prices, "tomorrow": []},
+        const.ENTITY_TARGET_SOC: 80,
+        const.ENTITY_SMART_SWITCH: True,
+        const.ENTITY_MIN_SOC: 20,
+        const.ENTITY_DEPARTURE_TIME: time(7, 0),  # Default: 07:00
+        "car_soc": 40,
+        "car_plugged": True,
+        "calendar_events": [
+            {"start": calendar_event_feb24, "summary": "Far Future Event", "description": ""}
+        ],
+    }
+    config = {"max_fuse": 20.0, "charger_loss": 10.0, "car_capacity": 64.0, "has_price_sensor": True}
+    
+    plan = planner.generate_charging_plan(data, config, manual_override=False, now=now)
+    
+    # Should use default time (07:00 tomorrow = Feb 23 07:00), not Feb 24 08:30
+    departure_dt = datetime.fromisoformat(plan["departure_time"])
+    assert departure_dt.date().day == 23  # Feb 23 (tomorrow), not Feb 24
+    assert departure_dt.hour == 7  # Default time 07:00
+    assert departure_dt.minute == 0
+    # Summary should say "(Manual)" not "(Calendar)"
+    assert "(Manual)" in plan["charging_summary"] or "Manual" in plan["charging_summary"]
+
+
+def test_calendar_event_tomorrow_with_full_today_prices_should_plan():
+    """When calendar event is tomorrow but we have full prices for today,
+    planner should create a plan for today instead of waiting for tomorrow's prices.
+    
+    This is the fix for the bug where car didn't charge overnight when calendar
+    event was the next morning.
+    """
+    now = datetime(2026, 2, 22, 0, 0)  # Feb 22 midnight
+    # Calendar event tomorrow morning
+    calendar_event_feb23 = datetime(2026, 2, 23, 7, 5).isoformat()
+    
+    # Full day of prices for Feb 22 (96 quarter-hour slots until 23:45)
+    feb22_prices = make_price_list(length=96, base=0.55, low_indices=[0, 1, 2, 3, 12, 13], low_value=0.45)
+    
+    data = {
+        "price_data": {"today": feb22_prices, "tomorrow": [], "tomorrow_valid": False},
+        const.ENTITY_TARGET_SOC: 80,
+        const.ENTITY_SMART_SWITCH: True,
+        const.ENTITY_MIN_SOC: 20,
+        const.ENTITY_DEPARTURE_TIME: time(7, 0),
+        "car_soc": 57,
+        "car_plugged": True,
+        "calendar_events": [
+            {"start": calendar_event_feb23, "summary": "Climate", "description": ""}
+        ],
+    }
+    config = {"max_fuse": 20.0, "charger_loss": 0.0, "car_capacity": 64.0, "has_price_sensor": True}
+    
+    plan = planner.generate_charging_plan(data, config, manual_override=False, now=now)
+    
+    # Should NOT be waiting for prices
+    assert "Waiting for additional price data" not in plan.get("charging_summary", "")
+    
+    # Should have active charging slots scheduled for today (Feb 22)
+    schedule = plan.get("charging_schedule", [])
+    active_slots = [s for s in schedule if s.get("active", False)]
+    assert len(active_slots) > 0, "Should have active charging slots for today"
+    
+    # First active slot should be on Feb 22
+    first_active = active_slots[0]
+    first_start = datetime.fromisoformat(first_active["start"])
+    assert first_start.date().day == 22, "First charging slot should be on Feb 22 (today)"
+    
+    # Departure should still be Feb 23 07:05 from calendar
+    departure_dt = datetime.fromisoformat(plan["departure_time"])
+    assert departure_dt.date().day == 23
+    assert departure_dt.hour == 7
+    assert departure_dt.minute == 5
+    assert "(Calendar)" in plan["charging_summary"]
+
+
+def test_calendar_event_today_evening_should_not_wait():
+    """When calendar event is later today, planner should use it and not wait
+    for tomorrow's prices.
+    """
+    now = datetime(2026, 2, 22, 8, 0)  # Feb 22 morning
+    # Calendar event this evening
+    calendar_event_today = datetime(2026, 2, 22, 18, 0).isoformat()
+    
+    # Prices for today until 23:45
+    feb22_prices = make_price_list(length=96, base=0.65, low_indices=[32, 33, 34, 35], low_value=0.50)
+    
+    data = {
+        "price_data": {"today": feb22_prices, "tomorrow": []},
+        const.ENTITY_TARGET_SOC: 80,
+        const.ENTITY_SMART_SWITCH: True,
+        const.ENTITY_MIN_SOC: 20,
+        const.ENTITY_DEPARTURE_TIME: time(7, 0),
+        "car_soc": 50,
+        "car_plugged": True,
+        "calendar_events": [
+            {"start": calendar_event_today, "summary": "Evening Trip", "description": ""}
+        ],
+    }
+    config = {"max_fuse": 20.0, "charger_loss": 0.0, "car_capacity": 64.0, "has_price_sensor": True}
+    
+    plan = planner.generate_charging_plan(data, config, manual_override=False, now=now)
+    
+    # Should NOT be waiting for prices (departure is today, we have today's prices)
+    assert "Waiting for additional price data" not in plan.get("charging_summary", "")
+    
+    # Departure should be today at 18:00
+    departure_dt = datetime.fromisoformat(plan["departure_time"])
+    assert departure_dt.date().day == 22
+    assert departure_dt.hour == 18
+    assert "(Calendar)" in plan["charging_summary"]
+

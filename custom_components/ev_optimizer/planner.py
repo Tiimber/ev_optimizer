@@ -406,7 +406,33 @@ def generate_charging_plan(
             )
             _LOGGER.debug("🕐 Price horizon does NOT cover departure. Latest start: %s (now: %s)",
                           latest_start_dt.strftime("%H:%M"), now.strftime("%H:%M"))
-            if now < latest_start_dt:
+            
+            # CRITICAL FIX: If departure is tomorrow AND we're early in current day (before 08:00)
+            # AND we have full prices for today, don't wait - plan with what we have.
+            # This prevents calendar events for tomorrow from blocking charging during the night.
+            # But if we're late in the day (e.g., afternoon), we should wait because the best
+            # charging time might be tonight (which requires tomorrow's prices).
+            end_of_today_threshold = datetime.combine(now.date(), time(23, 0, 0))
+            departure_is_tomorrow_or_later = dept_dt.date() > now.date()
+            have_prices_for_rest_of_today = last_price_end and last_price_end >= end_of_today_threshold
+            early_in_day = now.hour < 8  # Before 08:00
+            
+            should_wait_for_prices = False
+            if departure_is_tomorrow_or_later and have_prices_for_rest_of_today and early_in_day:
+                _LOGGER.info(
+                    "📅 Departure is on %s (tomorrow+), but we're early in the day (hour %d) "
+                    "and have full prices for today (%s until %s). "
+                    "Planning with available data instead of waiting for tomorrow's prices.",
+                    dept_dt.strftime("%Y-%m-%d"),
+                    now.hour,
+                    now.strftime("%Y-%m-%d"),
+                    last_price_end.strftime("%Y-%m-%d %H:%M") if last_price_end else "unknown"
+                )
+                should_wait_for_prices = False
+            elif now < latest_start_dt:
+                should_wait_for_prices = True
+            
+            if should_wait_for_prices:
                 plan["should_charge_now"] = False
                 horizon_str = last_price_end.strftime("%H:%M") if last_price_end else "unknown"
                 
