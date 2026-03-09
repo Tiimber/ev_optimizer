@@ -54,6 +54,7 @@ def _make_ha_stubs():
             return None
 
         def async_delay_save(self, func, delay):
+            """Schedule a delayed save (doesn't return awaitable in real HA)."""
             return None
 
     storage.Store = Store
@@ -74,6 +75,17 @@ def _make_ha_stubs():
     def callback(func): return func
     core.HomeAssistant = HomeAssistant
     core.callback = callback
+
+    # homeassistant.util.dt stub for snapshot_manager
+    util_module = ModuleType("homeassistant.util")
+    dt_module = ModuleType("homeassistant.util.dt")
+    from datetime import datetime, timezone
+    def now():
+        return datetime.now(timezone.utc)
+    dt_module.now = now
+    util_module.dt = dt_module
+    sys.modules["homeassistant.util"] = util_module
+    sys.modules["homeassistant.util.dt"] = dt_module
 
     # Insert into sys.modules
     sys.modules["homeassistant.const"] = const

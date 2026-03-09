@@ -227,7 +227,7 @@ class SnapshotManager:
             "snapshots": self.snapshots,
             "last_updated": dt_util.now().isoformat(),
         }
-        await self.store.async_save(data)
+        self.store.async_delay_save(lambda: data, 2.0)
     
     async def _save_prices(self):
         """Save prices to storage."""
@@ -236,7 +236,7 @@ class SnapshotManager:
             "prices": self.prices_by_date,
             "last_updated": dt_util.now().isoformat(),
         }
-        await self.price_store.async_save(data)
+        self.price_store.async_delay_save(lambda: data, 2.0)
     
     async def cleanup_old_snapshots(self):
         """Remove snapshots and prices older than MAX_AGE_DAYS."""
