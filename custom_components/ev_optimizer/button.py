@@ -26,6 +26,8 @@ async def async_setup_entry(
             EVDumpDebugStateButton(coordinator),
             EVDumpCustomScenarioButton(coordinator),
             ResetEfficiencyLearningButton(coordinator),
+            CaptureSnapshotButton(coordinator),
+            ExportSnapshotsButton(coordinator),
         ]
     )
 
@@ -129,3 +131,40 @@ class ResetEfficiencyLearningButton(CoordinatorEntity, ButtonEntity):
         )
         
         await self.coordinator.async_refresh()
+
+
+class CaptureSnapshotButton(CoordinatorEntity, ButtonEntity):
+    """Button to manually capture a snapshot for debugging."""
+    
+    _attr_has_entity_name = False
+    _attr_name = "Capture Debug Snapshot"
+    _attr_unique_id = "ev_optimizer_capture_snapshot"
+    _attr_icon = "mdi:camera"
+    
+    async def async_press(self) -> None:
+        """Handle the button press."""
+        await self.coordinator.snapshot_manager.capture_snapshot(
+            coordinator_data=self.coordinator.data,
+            plan=self.coordinator.data,
+            actions_taken=["Manual snapshot capture via button"]
+        )
+        self.coordinator._add_log("Debug snapshot captured manually")
+
+
+class ExportSnapshotsButton(CoordinatorEntity, ButtonEntity):
+    """Button to export all snapshots to www/ directory."""
+    
+    _attr_has_entity_name = False
+    _attr_name = "Export Debug Snapshots"
+    _attr_unique_id = "ev_optimizer_export_snapshots"
+    _attr_icon = "mdi:download"
+    
+    async def async_press(self) -> None:
+        """Handle the button press."""
+        try:
+            file_path = await self.coordinator.snapshot_manager.export_snapshots(
+                output_format="json"
+            )
+            self.coordinator._add_log(f"Snapshots exported to {file_path}")
+        except Exception as e:
+            self.coordinator._add_log(f"Export failed: {e}")

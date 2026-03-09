@@ -18,3 +18,74 @@ dump_debug_state:
     all configuration, sensor data, price data, and decision inputs needed to
     reproduce the current charging decision in isolation. Check Home Assistant
     logs after calling this service to copy the JSON output.
+
+capture_snapshot:
+  name: Capture Snapshot Now
+  description: >
+    Manually captures a snapshot of the current system state. Snapshots are captured 
+    automatically every hour, but this service allows you to force a snapshot at any time
+    for debugging purposes.
+
+export_snapshots:
+  name: Export Debug Snapshots
+  description: >
+    Exports all stored snapshots (up to 7 days) to a downloadable file in the www/ directory.
+    The file will be accessible at /local/ev_optimizer_debug_TIMESTAMP.format
+  fields:
+    start_time:
+      name: Start Time
+      description: Start of time range to export (ISO format, e.g., "2026-03-02T18:00:00"). Leave empty for 7 days ago.
+      required: false
+      example: "2026-03-02T18:00:00"
+      selector:
+        text:
+    end_time:
+      name: End Time
+      description: End of time range to export (ISO format). Leave empty for now.
+      required: false
+      example: "2026-03-03T08:00:00"
+      selector:
+        text:
+    output_format:
+      name: Output Format
+      description: Format for the exported file
+      required: false
+      default: "json"
+      selector:
+        select:
+          options:
+            - "json"
+            - "yaml"
+            - "html"
+
+replay_scenario:
+  name: Replay Scenario
+  description: >
+    Replays a charging scenario from stored snapshots and generates a report showing
+    what decisions were made and why. Useful for debugging why the car didn't charge.
+  fields:
+    start_time:
+      name: Start Time
+      description: Start of replay period (ISO format, e.g., "2026-03-02T18:00:00")
+      required: true
+      example: "2026-03-02T18:00:00"
+      selector:
+        text:
+    end_time:
+      name: End Time
+      description: End of replay period (ISO format, e.g., "2026-03-03T08:00:00")
+      required: true
+      example: "2026-03-03T08:00:00"
+      selector:
+        text:
+    output_format:
+      name: Output Format
+      description: Format for the replay report
+      required: false
+      default: "html"
+      selector:
+        select:
+          options:
+            - "html"
+            - "json"
+            - "yaml"

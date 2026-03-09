@@ -97,6 +97,7 @@ from time import perf_counter
 from .image_generator import generate_report_image, generate_plan_image
 from .planner import generate_charging_plan, calculate_load_balancing, analyze_prices
 from .session_manager import SessionManager
+from .snapshot_manager import SnapshotManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -120,6 +121,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         
         # Session & Logging Management
         self.session_manager = SessionManager(hass)
+        
+        # Snapshot Management for debugging
+        self.snapshot_manager = SnapshotManager(hass, entry.entry_id)
+        self._actions_this_update = []  # Track actions taken in current update
 
         # Scheduling state
 
@@ -298,6 +303,8 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
     def _add_log(self, message: str):
         """Add an entry to the action log."""
         self.session_manager.add_log(message)
+        # Also track for this update's snapshot
+        self._actions_this_update.append(message)
 
     async def _load_data(self):
         """Load persisted settings from disk with robust error handling."""
@@ -305,6 +312,9 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             return
 
         try:
+            # Load snapshots for debugging
+            await self.snapshot_manager.async_load()
+            
             data = await self.store.async_load()
             if data:
                 self.manual_override_active = data.get("manual_override_active", False)
@@ -610,6 +620,14 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             self._record_session_data(data)
             data["action_log"] = self.session_manager.action_log
             data["last_session_data"] = self.session_manager.last_session_data
+            
+            # Capture snapshot for debugging (async, non-blocking)
+            await self.snapshot_manager.capture_snapshot(
+                coordinator_data=data,
+                plan=plan,
+                actions_taken=self._actions_this_update.copy() if self._actions_this_update else None
+            )
+            self._actions_this_update = []  # Reset for next update
 
             # Performance Logging
             duration = perf_counter() - start_time

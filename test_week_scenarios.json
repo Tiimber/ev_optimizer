@@ -1,0 +1,965 @@
+{
+  "export_info": {
+    "created_at": "2026-03-09T08:00:00+01:00",
+    "start_time": "2026-03-02T00:00:00+01:00",
+    "end_time": "2026-03-09T08:00:00+01:00",
+    "snapshot_count": 48,
+    "version": 1
+  },
+  "snapshots": [
+    {
+      "timestamp": "2026-03-02T00:00:00+01:00",
+      "car_soc": 45,
+      "car_plugged": true,
+      "virtual_soc": 45.2,
+      "should_charge_now": false,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-02T07:30:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Waiting for cheaper prices (planned slots at 02:00-05:00)",
+      "calendar_events": [{"start": "2026-03-02T07:30:00+01:00", "label_hash": "a1b2c3d4", "target_soc_pct": null}],
+      "price_date": "2026-03-02",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-02T01:00:00+01:00",
+      "car_soc": 45,
+      "car_plugged": true,
+      "virtual_soc": 45.2,
+      "should_charge_now": false,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-02T07:30:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Waiting for cheaper prices (planned slots at 02:00-05:00)",
+      "calendar_events": [{"start": "2026-03-02T07:30:00+01:00", "label_hash": "a1b2c3d4", "target_soc_pct": null}],
+      "price_date": "2026-03-02",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-02T02:00:00+01:00",
+      "car_soc": 45,
+      "car_plugged": true,
+      "virtual_soc": 45.2,
+      "should_charge_now": true,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-02T07:30:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: Night pricing optimal",
+      "calendar_events": [{"start": "2026-03-02T07:30:00+01:00", "label_hash": "a1b2c3d4", "target_soc_pct": null}],
+      "price_date": "2026-03-02",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-02T02:00:34+01:00",
+          "actions": ["Starting charging session", "Switched Charging state to: ACTIVE", "Set charging current to 22A"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-02T03:00:00+01:00",
+      "car_soc": 58,
+      "car_plugged": true,
+      "virtual_soc": 58.3,
+      "should_charge_now": true,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-02T07:30:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: Night pricing optimal",
+      "calendar_events": [{"start": "2026-03-02T07:30:00+01:00", "label_hash": "a1b2c3d4", "target_soc_pct": null}],
+      "price_date": "2026-03-02",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-02T04:00:00+01:00",
+      "car_soc": 71,
+      "car_plugged": true,
+      "virtual_soc": 71.5,
+      "should_charge_now": true,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-02T07:30:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: Approaching target SoC",
+      "calendar_events": [{"start": "2026-03-02T07:30:00+01:00", "label_hash": "a1b2c3d4", "target_soc_pct": null}],
+      "price_date": "2026-03-02",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-02T05:00:00+01:00",
+      "car_soc": 80,
+      "car_plugged": true,
+      "virtual_soc": 80.0,
+      "should_charge_now": false,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-02T07:30:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Target SoC 80% reached",
+      "calendar_events": [{"start": "2026-03-02T07:30:00+01:00", "label_hash": "a1b2c3d4", "target_soc_pct": null}],
+      "price_date": "2026-03-02",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-02T05:12:45+01:00",
+          "actions": ["Target SoC reached", "Switched Charging state to: PAUSED"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-02T06:00:00+01:00",
+      "car_soc": 80,
+      "car_plugged": true,
+      "virtual_soc": 80.0,
+      "should_charge_now": false,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-02T07:30:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Target SoC 80% reached",
+      "calendar_events": [{"start": "2026-03-02T07:30:00+01:00", "label_hash": "a1b2c3d4", "target_soc_pct": null}],
+      "price_date": "2026-03-02",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-02T07:00:00+01:00",
+      "car_soc": 80,
+      "car_plugged": true,
+      "virtual_soc": 80.0,
+      "should_charge_now": false,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-02T07:30:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Ready for departure at 07:30",
+      "calendar_events": [{"start": "2026-03-02T07:30:00+01:00", "label_hash": "a1b2c3d4", "target_soc_pct": null}],
+      "price_date": "2026-03-02",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-02T08:00:00+01:00",
+      "car_soc": 80,
+      "car_plugged": false,
+      "virtual_soc": 80.0,
+      "should_charge_now": false,
+      "planned_target_soc": 80,
+      "departure_time": null,
+      "max_available_current": 0,
+      "charging_summary": "Car unplugged",
+      "calendar_events": [],
+      "price_date": "2026-03-02",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-02T08:15:23+01:00",
+          "actions": ["Car unplugged"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-02T17:00:00+01:00",
+      "car_soc": 52,
+      "car_plugged": true,
+      "virtual_soc": 52.1,
+      "should_charge_now": false,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-03T07:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Waiting for night prices (planned slots at 23:00-04:00)",
+      "calendar_events": [],
+      "price_date": "2026-03-02",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-02T17:23:12+01:00",
+          "actions": ["Car plugged in", "Using default departure time 07:00"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-02T23:00:00+01:00",
+      "car_soc": 52,
+      "car_plugged": true,
+      "virtual_soc": 52.1,
+      "should_charge_now": true,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-03T07:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: Night pricing optimal",
+      "calendar_events": [],
+      "price_date": "2026-03-02",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-02T23:00:45+01:00",
+          "actions": ["Starting charging session", "Switched Charging state to: ACTIVE"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-03T00:00:00+01:00",
+      "car_soc": 65,
+      "car_plugged": true,
+      "virtual_soc": 65.4,
+      "should_charge_now": true,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-03T07:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: Night pricing optimal",
+      "calendar_events": [],
+      "price_date": "2026-03-03",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-03T01:00:00+01:00",
+      "car_soc": 78,
+      "car_plugged": true,
+      "virtual_soc": 78.2,
+      "should_charge_now": true,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-03T07:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: Approaching target",
+      "calendar_events": [],
+      "price_date": "2026-03-03",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-03T02:00:00+01:00",
+      "car_soc": 80,
+      "car_plugged": true,
+      "virtual_soc": 80.0,
+      "should_charge_now": false,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-03T07:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Target SoC 80% reached",
+      "calendar_events": [],
+      "price_date": "2026-03-03",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-03T02:18:34+01:00",
+          "actions": ["Target SoC reached", "Switched Charging state to: PAUSED"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-03T13:00:00+01:00",
+      "car_soc": 37,
+      "car_plugged": true,
+      "virtual_soc": 37.3,
+      "should_charge_now": false,
+      "planned_target_soc": 85,
+      "departure_time": "2026-03-03T18:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Manual override: Target set to 85%",
+      "calendar_events": [{"start": "2026-03-03T18:00:00+01:00", "label_hash": "b2c3d4e5", "target_soc_pct": 85}],
+      "price_date": "2026-03-03",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-03T13:22:11+01:00",
+          "actions": ["Car plugged in", "Calendar event detected: departure at 18:00", "User set target SoC to 85%"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-03T14:00:00+01:00",
+      "car_soc": 37,
+      "car_plugged": true,
+      "virtual_soc": 37.3,
+      "should_charge_now": true,
+      "planned_target_soc": 85,
+      "departure_time": "2026-03-03T18:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: Must reach 85% by 18:00, starting now",
+      "calendar_events": [{"start": "2026-03-03T18:00:00+01:00", "label_hash": "b2c3d4e5", "target_soc_pct": 85}],
+      "price_date": "2026-03-03",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-03T14:00:23+01:00",
+          "actions": ["Starting charging session (limited time available)", "Switched Charging state to: ACTIVE"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-03T15:00:00+01:00",
+      "car_soc": 50,
+      "car_plugged": true,
+      "virtual_soc": 50.8,
+      "should_charge_now": true,
+      "planned_target_soc": 85,
+      "departure_time": "2026-03-03T18:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: On track to reach 85% by 18:00",
+      "calendar_events": [{"start": "2026-03-03T18:00:00+01:00", "label_hash": "b2c3d4e5", "target_soc_pct": 85}],
+      "price_date": "2026-03-03",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-03T16:00:00+01:00",
+      "car_soc": 63,
+      "car_plugged": true,
+      "virtual_soc": 63.5,
+      "should_charge_now": true,
+      "planned_target_soc": 85,
+      "departure_time": "2026-03-03T18:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: On track to reach 85% by 18:00",
+      "calendar_events": [{"start": "2026-03-03T18:00:00+01:00", "label_hash": "b2c3d4e5", "target_soc_pct": 85}],
+      "price_date": "2026-03-03",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-03T17:00:00+01:00",
+      "car_soc": 76,
+      "car_plugged": true,
+      "virtual_soc": 76.2,
+      "should_charge_now": true,
+      "planned_target_soc": 85,
+      "departure_time": "2026-03-03T18:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: Approaching target 85%",
+      "calendar_events": [{"start": "2026-03-03T18:00:00+01:00", "label_hash": "b2c3d4e5", "target_soc_pct": 85}],
+      "price_date": "2026-03-03",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-03T18:00:00+01:00",
+      "car_soc": 85,
+      "car_plugged": false,
+      "virtual_soc": 85.0,
+      "should_charge_now": false,
+      "planned_target_soc": 85,
+      "departure_time": null,
+      "max_available_current": 0,
+      "charging_summary": "Car unplugged (target 85% reached)",
+      "calendar_events": [],
+      "price_date": "2026-03-03",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-03T18:03:12+01:00",
+          "actions": ["Target SoC reached", "Switched Charging state to: PAUSED"]
+        },
+        {
+          "timestamp": "2026-03-03T18:15:45+01:00",
+          "actions": ["Car unplugged"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-04T22:00:00+01:00",
+      "car_soc": 48,
+      "car_plugged": true,
+      "virtual_soc": 48.4,
+      "should_charge_now": false,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-05T06:30:00+01:00",
+      "max_available_current": 9,
+      "charging_summary": "Load balanced: Available 9A (house using 37A). Planned slots when house consumption lower.",
+      "calendar_events": [{"start": "2026-03-05T06:30:00+01:00", "label_hash": "c3d4e5f6", "target_soc_pct": null}],
+      "price_date": "2026-03-04",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-04T22:34:23+01:00",
+          "actions": ["Car plugged in", "Load balancing: Only 9A available (below minimum 12A)", "Will wait for lower house consumption"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-04T23:00:00+01:00",
+      "car_soc": 48,
+      "car_plugged": true,
+      "virtual_soc": 48.4,
+      "should_charge_now": false,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-05T06:30:00+01:00",
+      "max_available_current": 11,
+      "charging_summary": "Load balanced: Available 11A (below minimum 12A). Waiting.",
+      "calendar_events": [{"start": "2026-03-05T06:30:00+01:00", "label_hash": "c3d4e5f6", "target_soc_pct": null}],
+      "price_date": "2026-03-04",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-05T00:00:00+01:00",
+      "car_soc": 48,
+      "car_plugged": true,
+      "virtual_soc": 48.4,
+      "should_charge_now": true,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-05T06:30:00+01:00",
+      "max_available_current": 16,
+      "charging_summary": "Charging: House consumption dropped, 16A available",
+      "calendar_events": [{"start": "2026-03-05T06:30:00+01:00", "label_hash": "c3d4e5f6", "target_soc_pct": null}],
+      "price_date": "2026-03-05",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-05T00:00:34+01:00",
+          "actions": ["Load balancing: 16A available", "Starting charging session", "Switched Charging state to: ACTIVE", "Set charging current to 16A"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-05T01:00:00+01:00",
+      "car_soc": 57,
+      "car_plugged": true,
+      "virtual_soc": 57.1,
+      "should_charge_now": true,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-05T06:30:00+01:00",
+      "max_available_current": 18,
+      "charging_summary": "Charging: Reduced rate due to load balancing (18A)",
+      "calendar_events": [{"start": "2026-03-05T06:30:00+01:00", "label_hash": "c3d4e5f6", "target_soc_pct": null}],
+      "price_date": "2026-03-05",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-05T01:15:23+01:00",
+          "actions": ["Load balancing: Increased to 18A"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-05T02:00:00+01:00",
+      "car_soc": 66,
+      "car_plugged": true,
+      "virtual_soc": 66.3,
+      "should_charge_now": true,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-05T06:30:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: Full rate available (22A)",
+      "calendar_events": [{"start": "2026-03-05T06:30:00+01:00", "label_hash": "c3d4e5f6", "target_soc_pct": null}],
+      "price_date": "2026-03-05",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-05T02:00:12+01:00",
+          "actions": ["Load balancing: Full 22A available"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-05T03:00:00+01:00",
+      "car_soc": 79,
+      "car_plugged": true,
+      "virtual_soc": 79.5,
+      "should_charge_now": true,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-05T06:30:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: Approaching target 80%",
+      "calendar_events": [{"start": "2026-03-05T06:30:00+01:00", "label_hash": "c3d4e5f6", "target_soc_pct": null}],
+      "price_date": "2026-03-05",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-05T04:00:00+01:00",
+      "car_soc": 80,
+      "car_plugged": true,
+      "virtual_soc": 80.0,
+      "should_charge_now": false,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-05T06:30:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Target SoC 80% reached",
+      "calendar_events": [{"start": "2026-03-05T06:30:00+01:00", "label_hash": "c3d4e5f6", "target_soc_pct": null}],
+      "price_date": "2026-03-05",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-05T04:08:23+01:00",
+          "actions": ["Target SoC reached", "Switched Charging state to: PAUSED"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-05T16:00:00+01:00",
+      "car_soc": 42,
+      "car_plugged": true,
+      "virtual_soc": 42.7,
+      "should_charge_now": false,
+      "planned_target_soc": 90,
+      "departure_time": "2026-03-05T19:30:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Manual override: Force charge OFF",
+      "calendar_events": [{"start": "2026-03-05T19:30:00+01:00", "label_hash": "d4e5f6g7", "target_soc_pct": 90}],
+      "price_date": "2026-03-05",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-05T16:12:45+01:00",
+          "actions": ["Car plugged in", "Calendar event: departure at 19:30, target 90%", "User set manual override: FORCE_OFF"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-05T17:00:00+01:00",
+      "car_soc": 42,
+      "car_plugged": true,
+      "virtual_soc": 42.7,
+      "should_charge_now": false,
+      "planned_target_soc": 90,
+      "departure_time": "2026-03-05T19:30:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Manual override: Force charge OFF (not enough time to reach 90%)",
+      "calendar_events": [{"start": "2026-03-05T19:30:00+01:00", "label_hash": "d4e5f6g7", "target_soc_pct": 90}],
+      "price_date": "2026-03-05",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-05T18:00:00+01:00",
+      "car_soc": 42,
+      "car_plugged": true,
+      "virtual_soc": 42.7,
+      "should_charge_now": false,
+      "planned_target_soc": 90,
+      "departure_time": "2026-03-05T19:30:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Manual override cleared: Not enough time to reach 90%",
+      "calendar_events": [{"start": "2026-03-05T19:30:00+01:00", "label_hash": "d4e5f6g7", "target_soc_pct": 90}],
+      "price_date": "2026-03-05",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-05T18:00:12+01:00",
+          "actions": ["User cleared manual override", "Warning: Only 1.5 hours until departure - cannot reach 90%"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-05T19:00:00+01:00",
+      "car_soc": 42,
+      "car_plugged": true,
+      "virtual_soc": 42.7,
+      "should_charge_now": false,
+      "planned_target_soc": 90,
+      "departure_time": "2026-03-05T19:30:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Cannot reach 90% in time (departure in 30 min)",
+      "calendar_events": [{"start": "2026-03-05T19:30:00+01:00", "label_hash": "d4e5f6g7", "target_soc_pct": 90}],
+      "price_date": "2026-03-05",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-06T08:00:00+01:00",
+      "car_soc": 28,
+      "car_plugged": true,
+      "virtual_soc": 28.3,
+      "should_charge_now": true,
+      "planned_target_soc": 50,
+      "departure_time": "2026-03-06T14:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Low SoC (28%): Charging immediately despite high daytime prices",
+      "calendar_events": [{"start": "2026-03-06T14:00:00+01:00", "label_hash": "e5f6g7h8", "target_soc_pct": 50}],
+      "price_date": "2026-03-06",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-06T08:23:45+01:00",
+          "actions": ["Car plugged in", "Low SoC detected: 28% (below safe threshold)", "Starting immediate charging", "Switched Charging state to: ACTIVE"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-06T09:00:00+01:00",
+      "car_soc": 37,
+      "car_plugged": true,
+      "virtual_soc": 37.8,
+      "should_charge_now": true,
+      "planned_target_soc": 50,
+      "departure_time": "2026-03-06T14:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging to safe SoC level (target 50%)",
+      "calendar_events": [{"start": "2026-03-06T14:00:00+01:00", "label_hash": "e5f6g7h8", "target_soc_pct": 50}],
+      "price_date": "2026-03-06",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-06T10:00:00+01:00",
+      "car_soc": 46,
+      "car_plugged": true,
+      "virtual_soc": 46.5,
+      "should_charge_now": true,
+      "planned_target_soc": 50,
+      "departure_time": "2026-03-06T14:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: Approaching target 50%",
+      "calendar_events": [{"start": "2026-03-06T14:00:00+01:00", "label_hash": "e5f6g7h8", "target_soc_pct": 50}],
+      "price_date": "2026-03-06",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-06T11:00:00+01:00",
+      "car_soc": 50,
+      "car_plugged": true,
+      "virtual_soc": 50.0,
+      "should_charge_now": false,
+      "planned_target_soc": 50,
+      "departure_time": "2026-03-06T14:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Target SoC 50% reached",
+      "calendar_events": [{"start": "2026-03-06T14:00:00+01:00", "label_hash": "e5f6g7h8", "target_soc_pct": 50}],
+      "price_date": "2026-03-06",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-06T11:02:34+01:00",
+          "actions": ["Target SoC reached", "Switched Charging state to: PAUSED"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-06T19:00:00+01:00",
+      "car_soc": 35,
+      "car_plugged": true,
+      "virtual_soc": 35.2,
+      "should_charge_now": false,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-07T09:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Two calendar events found: Using earliest departure (09:00)",
+      "calendar_events": [
+        {"start": "2026-03-07T09:00:00+01:00", "label_hash": "f6g7h8i9", "target_soc_pct": null},
+        {"start": "2026-03-07T14:00:00+01:00", "label_hash": "g7h8i9j0", "target_soc_pct": null}
+      ],
+      "price_date": "2026-03-06",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-06T19:12:34+01:00",
+          "actions": ["Car plugged in", "Multiple calendar events found - using earliest departure"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-06T23:00:00+01:00",
+      "car_soc": 35,
+      "car_plugged": true,
+      "virtual_soc": 35.2,
+      "should_charge_now": true,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-07T09:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: Night pricing active",
+      "calendar_events": [
+        {"start": "2026-03-07T09:00:00+01:00", "label_hash": "f6g7h8i9", "target_soc_pct": null},
+        {"start": "2026-03-07T14:00:00+01:00", "label_hash": "g7h8i9j0", "target_soc_pct": null}
+      ],
+      "price_date": "2026-03-06",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-06T23:00:34+01:00",
+          "actions": ["Starting charging session", "Switched Charging state to: ACTIVE"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-07T00:00:00+01:00",
+      "car_soc": 48,
+      "car_plugged": true,
+      "virtual_soc": 48.7,
+      "should_charge_now": true,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-07T09:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: Night pricing optimal",
+      "calendar_events": [
+        {"start": "2026-03-07T09:00:00+01:00", "label_hash": "f6g7h8i9", "target_soc_pct": null},
+        {"start": "2026-03-07T14:00:00+01:00", "label_hash": "g7h8i9j0", "target_soc_pct": null}
+      ],
+      "price_date": "2026-03-07",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-07T01:00:00+01:00",
+      "car_soc": 61,
+      "car_plugged": true,
+      "virtual_soc": 61.3,
+      "should_charge_now": true,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-07T09:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: Night pricing optimal",
+      "calendar_events": [
+        {"start": "2026-03-07T09:00:00+01:00", "label_hash": "f6g7h8i9", "target_soc_pct": null},
+        {"start": "2026-03-07T14:00:00+01:00", "label_hash": "g7h8i9j0", "target_soc_pct": null}
+      ],
+      "price_date": "2026-03-07",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-07T02:00:00+01:00",
+      "car_soc": 74,
+      "car_plugged": true,
+      "virtual_soc": 74.8,
+      "should_charge_now": true,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-07T09:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: Approaching target 80%",
+      "calendar_events": [
+        {"start": "2026-03-07T09:00:00+01:00", "label_hash": "f6g7h8i9", "target_soc_pct": null},
+        {"start": "2026-03-07T14:00:00+01:00", "label_hash": "g7h8i9j0", "target_soc_pct": null}
+      ],
+      "price_date": "2026-03-07",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-07T03:00:00+01:00",
+      "car_soc": 80,
+      "car_plugged": true,
+      "virtual_soc": 80.0,
+      "should_charge_now": false,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-07T09:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Target SoC 80% reached",
+      "calendar_events": [
+        {"start": "2026-03-07T09:00:00+01:00", "label_hash": "f6g7h8i9", "target_soc_pct": null},
+        {"start": "2026-03-07T14:00:00+01:00", "label_hash": "g7h8i9j0", "target_soc_pct": null}
+      ],
+      "price_date": "2026-03-07",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-07T03:14:23+01:00",
+          "actions": ["Target SoC reached", "Switched Charging state to: PAUSED"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-07T15:00:00+01:00",
+      "car_soc": 62,
+      "car_plugged": true,
+      "virtual_soc": 62.4,
+      "should_charge_now": false,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-08T07:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Waiting for night prices",
+      "calendar_events": [],
+      "price_date": "2026-03-07",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-07T15:34:12+01:00",
+          "actions": ["Car plugged in", "Using default departure time 07:00"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-07T23:00:00+01:00",
+      "car_soc": 62,
+      "car_plugged": true,
+      "virtual_soc": 62.4,
+      "should_charge_now": true,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-08T07:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: Night pricing active",
+      "calendar_events": [],
+      "price_date": "2026-03-07",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-07T23:00:23+01:00",
+          "actions": ["Starting charging session", "Switched Charging state to: ACTIVE"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-08T00:00:00+01:00",
+      "car_soc": 75,
+      "car_plugged": true,
+      "virtual_soc": 75.2,
+      "should_charge_now": true,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-08T07:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: Approaching target 80%",
+      "calendar_events": [],
+      "price_date": "2026-03-08",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-08T01:00:00+01:00",
+      "car_soc": 80,
+      "car_plugged": true,
+      "virtual_soc": 80.0,
+      "should_charge_now": false,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-08T07:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Target SoC 80% reached",
+      "calendar_events": [],
+      "price_date": "2026-03-08",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-08T01:03:56+01:00",
+          "actions": ["Target SoC reached", "Switched Charging state to: PAUSED"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-08T14:00:00+01:00",
+      "car_soc": 18,
+      "car_plugged": true,
+      "virtual_soc": 18.6,
+      "should_charge_now": true,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-09T07:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Critical low SoC (18%): Charging immediately despite expensive prices",
+      "calendar_events": [],
+      "price_date": "2026-03-08",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-08T14:23:12+01:00",
+          "actions": ["Car plugged in", "Critical low SoC: 18%", "Starting immediate emergency charging", "Switched Charging state to: ACTIVE"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-08T15:00:00+01:00",
+      "car_soc": 31,
+      "car_plugged": true,
+      "virtual_soc": 31.8,
+      "should_charge_now": true,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-09T07:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Low SoC emergency charging (will pause at 40%)",
+      "calendar_events": [],
+      "price_date": "2026-03-08",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-08T16:00:00+01:00",
+      "car_soc": 40,
+      "car_plugged": true,
+      "virtual_soc": 40.2,
+      "should_charge_now": false,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-09T07:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Reached safe SoC (40%). Will resume at night for cheaper prices.",
+      "calendar_events": [],
+      "price_date": "2026-03-08",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-08T16:08:45+01:00",
+          "actions": ["Safe SoC level reached (40%)", "Pausing until cheaper night prices", "Switched Charging state to: PAUSED"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-08T22:00:00+01:00",
+      "car_soc": 40,
+      "car_plugged": true,
+      "virtual_soc": 40.2,
+      "should_charge_now": true,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-09T07:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: Night prices started, resuming to 80%",
+      "calendar_events": [],
+      "price_date": "2026-03-08",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-08T22:00:34+01:00",
+          "actions": ["Night prices now active", "Resuming charging to target 80%", "Switched Charging state to: ACTIVE"]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-08T23:00:00+01:00",
+      "car_soc": 53,
+      "car_plugged": true,
+      "virtual_soc": 53.7,
+      "should_charge_now": true,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-09T07:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: Night pricing optimal",
+      "calendar_events": [],
+      "price_date": "2026-03-08",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-09T00:00:00+01:00",
+      "car_soc": 66,
+      "car_plugged": true,
+      "virtual_soc": 66.3,
+      "should_charge_now": true,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-09T07:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: Night pricing optimal",
+      "calendar_events": [],
+      "price_date": "2026-03-09",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-09T01:00:00+01:00",
+      "car_soc": 79,
+      "car_plugged": true,
+      "virtual_soc": 79.8,
+      "should_charge_now": true,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-09T07:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Charging: Approaching target 80%",
+      "calendar_events": [],
+      "price_date": "2026-03-09",
+      "changes_this_hour": []
+    },
+    {
+      "timestamp": "2026-03-09T02:00:00+01:00",
+      "car_soc": 80,
+      "car_plugged": true,
+      "virtual_soc": 80.0,
+      "should_charge_now": false,
+      "planned_target_soc": 80,
+      "departure_time": "2026-03-09T07:00:00+01:00",
+      "max_available_current": 22,
+      "charging_summary": "Target SoC 80% reached",
+      "calendar_events": [],
+      "price_date": "2026-03-09",
+      "changes_this_hour": [
+        {
+          "timestamp": "2026-03-09T02:04:23+01:00",
+          "actions": ["Target SoC reached", "Switched Charging state to: PAUSED"]
+        }
+      ]
+    }
+  ],
+  "prices": {
+    "2026-03-02": {
+      "today": [0.52, 0.51, 0.48, 0.47, 0.45, 0.44, 0.43, 0.42, 0.41, 0.40, 0.39, 0.38, 0.42, 0.45, 0.48, 0.52, 0.58, 0.62, 0.68, 0.72, 0.75, 0.71, 0.68, 0.64, 0.60, 0.56, 0.54, 0.52, 0.50, 0.48, 0.46, 0.44, 0.43, 0.42, 0.41, 0.40, 0.45, 0.48, 0.52, 0.56, 0.60, 0.65, 0.70, 0.75, 0.80, 0.84, 0.88, 0.92, 0.95, 0.98, 1.02, 1.05, 1.08, 1.12, 1.15, 1.18, 1.22, 1.25, 1.20, 1.15, 1.10, 1.05, 1.00, 0.95, 0.90, 0.85, 0.80, 0.75, 0.70, 0.68, 0.66, 0.64, 0.62, 0.60, 0.58, 0.56, 0.54, 0.52, 0.50, 0.48, 0.46, 0.44, 0.42, 0.40, 0.38, 0.36, 0.35, 0.34, 0.33, 0.32, 0.31, 0.30, 0.32, 0.34, 0.36, 0.38],
+      "tomorrow": [0.40, 0.42, 0.44, 0.46, 0.48, 0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00, 1.05, 1.10, 1.08, 1.06, 1.04, 1.02, 1.00, 0.98, 0.96, 0.94, 0.92, 0.90, 0.88, 0.86, 0.84, 0.82, 0.80, 0.78, 0.76, 0.74, 0.72, 0.70, 0.68, 0.66, 0.64, 0.62, 0.60, 0.58, 0.56, 0.54, 0.52, 0.50, 0.48, 0.46, 0.44, 0.42, 0.40, 0.38, 0.36, 0.34, 0.32, 0.30, 0.28, 0.26, 0.24, 0.25, 0.26, 0.27, 0.28, 0.29, 0.30, 0.32, 0.34, 0.36, 0.38, 0.40, 0.42, 0.44, 0.46, 0.48, 0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.62, 0.64, 0.66, 0.68, 0.70, 0.72, 0.74, 0.76, 0.78, 0.80, 0.82],
+      "tomorrow_valid": true,
+      "stored_at": "2026-03-02T00:00:00+01:00"
+    },
+    "2026-03-03": {
+      "today": [0.40, 0.42, 0.44, 0.46, 0.48, 0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00, 1.05, 1.10, 1.08, 1.06, 1.04, 1.02, 1.00, 0.98, 0.96, 0.94, 0.92, 0.90, 0.88, 0.86, 0.84, 0.82, 0.80, 0.78, 0.76, 0.74, 0.72, 0.70, 0.68, 0.66, 0.64, 0.62, 0.60, 0.58, 0.56, 0.54, 0.52, 0.50, 0.48, 0.65, 0.72, 0.80, 0.88, 0.95, 1.02, 1.10, 1.18, 1.25, 1.22, 1.18, 1.15, 1.12, 1.08, 1.05, 1.02, 0.98, 0.95, 0.92, 0.88, 0.85, 0.82, 0.78, 0.75, 0.72, 0.68, 0.65, 0.62, 0.58, 0.55, 0.52, 0.48, 0.45, 0.42, 0.40, 0.38, 0.36, 0.34, 0.32, 0.30, 0.32, 0.34, 0.36, 0.38],
+      "tomorrow": [0.38, 0.40, 0.42, 0.44, 0.46, 0.48, 0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.62, 0.65, 0.68, 0.72, 0.75, 0.78, 0.82, 0.85, 0.88, 0.92, 0.95, 0.98, 1.02, 1.05, 1.08, 1.12, 1.15, 1.18, 1.20, 1.18, 1.15, 1.12, 1.08, 1.05, 1.02, 0.98, 0.95, 0.92, 0.88, 0.85, 0.82, 0.78, 0.75, 0.72, 0.68, 0.65, 0.62, 0.58, 0.55, 0.52, 0.48, 0.45, 0.42, 0.40, 0.38, 0.36, 0.34, 0.32, 0.30, 0.28, 0.26, 0.24, 0.22, 0.20, 0.22, 0.24, 0.26, 0.28, 0.30, 0.32, 0.34, 0.36, 0.38, 0.40, 0.42, 0.44, 0.46, 0.48, 0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.62, 0.64, 0.66, 0.68, 0.70, 0.72, 0.74, 0.76, 0.78, 0.80],
+      "tomorrow_valid": true,
+      "stored_at": "2026-03-03T00:00:00+01:00"
+    },
+    "2026-03-04": {
+      "today": [0.38, 0.40, 0.42, 0.44, 0.46, 0.48, 0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.62, 0.65, 0.68, 0.72, 0.75, 0.78, 0.82, 0.85, 0.88, 0.92, 0.95, 0.98, 1.02, 1.05, 1.08, 1.12, 1.15, 1.18, 1.20, 1.18, 1.15, 1.12, 1.08, 1.05, 1.02, 0.98, 0.95, 0.92, 0.88, 0.85, 0.82, 0.78, 0.75, 0.72, 0.68, 0.65, 0.62, 0.58, 0.55, 0.52, 0.48, 0.45, 0.42, 0.40, 0.38, 0.36, 0.34, 0.32, 0.30, 0.28, 0.26, 0.24, 0.22, 0.20, 0.22, 0.24, 0.26, 0.28, 0.30, 0.32, 0.34, 0.36, 0.38, 0.40, 0.42, 0.44, 0.46, 0.48, 0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.88, 0.90, 0.92, 0.94, 0.96, 0.98, 1.00, 1.02, 1.04, 1.06],
+      "tomorrow": [1.08, 1.06, 1.04, 1.02, 1.00, 0.98, 0.96, 0.94, 0.92, 0.90, 0.88, 0.86, 0.84, 0.82, 0.80, 0.78, 0.76, 0.74, 0.35, 0.32, 0.30, 0.28, 0.26, 0.24, 0.22, 0.20, 0.18, 0.16, 0.15, 0.14, 0.13, 0.14, 0.15, 0.16, 0.18, 0.20, 0.22, 0.24, 0.26, 0.28, 0.30, 0.32, 0.34, 0.36, 0.38, 0.40, 0.42, 0.44, 0.46, 0.48, 0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.62, 0.64, 0.66, 0.68, 0.70, 0.72, 0.74, 0.76, 0.78, 0.80, 0.82, 0.84, 0.86, 0.88, 0.90, 0.92, 0.94, 0.96, 0.98, 1.00, 1.02, 1.04, 1.06, 1.08, 1.10, 1.12, 1.14, 1.16, 1.18, 1.20, 1.22, 1.20, 1.18, 1.16, 1.14, 1.12, 1.10, 1.08, 1.06, 1.04],
+      "tomorrow_valid": true,
+      "stored_at": "2026-03-04T00:00:00+01:00"
+    },
+    "2026-03-05": {
+      "today": [1.08, 1.06, 1.04, 1.02, 1.00, 0.98, 0.96, 0.94, 0.92, 0.90, 0.88, 0.86, 0.84, 0.82, 0.80, 0.78, 0.76, 0.74, 0.35, 0.32, 0.30, 0.28, 0.26, 0.24, 0.22, 0.20, 0.18, 0.16, 0.15, 0.14, 0.13, 0.14, 0.15, 0.16, 0.18, 0.20, 0.22, 0.24, 0.26, 0.28, 0.30, 0.32, 0.34, 0.36, 0.38, 0.40, 0.42, 0.44, 0.46, 0.48, 0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.62, 0.64, 0.75, 0.82, 0.90, 0.98, 1.05, 1.12, 1.20, 1.28, 1.35, 1.42, 1.50, 1.45, 1.40, 1.35, 1.30, 1.25, 1.20, 1.15, 1.10, 1.05, 1.00, 0.95, 0.90, 0.85, 0.80, 0.75, 0.70, 0.65, 0.60, 0.55, 0.50, 0.45, 0.40, 0.38, 0.36, 0.34, 0.32, 0.30],
+      "tomorrow": [0.28, 0.26, 0.24, 0.22, 0.20, 0.18, 0.16, 0.15, 0.14, 0.13, 0.12, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.18, 0.20, 0.22, 0.24, 0.26, 0.28, 0.30, 0.32, 0.34, 0.36, 0.38, 0.40, 0.42, 0.44, 0.46, 0.48, 0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.62, 0.64, 0.66, 0.68, 0.70, 0.72, 0.74, 0.76, 0.78, 0.80, 0.82, 0.84, 0.86, 0.88, 0.90, 0.92, 0.94, 0.96, 0.98, 1.00, 1.02, 1.04, 1.06, 1.08, 1.10, 1.12, 1.14, 1.16, 1.18, 1.20, 1.22, 1.24, 1.26, 1.28, 1.30, 1.32, 1.30, 1.28, 1.26, 1.24, 1.22, 1.20, 1.18, 1.16, 1.14, 1.12, 1.10, 1.08, 1.06, 1.04, 1.02, 1.00, 0.98, 0.96, 0.94, 0.92, 0.90],
+      "tomorrow_valid": true,
+      "stored_at": "2026-03-05T00:00:00+01:00"
+    },
+    "2026-03-06": {
+      "today": [0.28, 0.26, 0.24, 0.22, 0.20, 0.18, 0.16, 0.15, 0.14, 0.13, 0.12, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.18, 0.20, 0.22, 0.24, 0.26, 0.28, 0.30, 0.32, 0.34, 0.36, 0.38, 0.40, 0.42, 0.44, 0.46, 0.95, 1.05, 1.15, 1.25, 1.35, 1.45, 1.55, 1.65, 1.75, 1.70, 1.65, 1.60, 1.55, 1.50, 1.45, 1.40, 1.35, 1.30, 1.25, 1.20, 1.15, 1.10, 1.05, 1.00, 0.95, 0.90, 0.85, 0.80, 0.75, 0.70, 0.65, 0.60, 0.55, 0.50, 0.45, 0.40, 0.38, 0.36, 0.34, 0.32, 0.30, 0.28, 0.26, 0.24, 0.22, 0.20, 0.18, 0.16, 0.15, 0.14, 0.13, 0.12, 0.11, 0.10, 0.12, 0.14, 0.16, 0.18, 0.20, 0.22, 0.24, 0.26, 0.28, 0.30],
+      "tomorrow": [0.32, 0.34, 0.36, 0.38, 0.40, 0.42, 0.44, 0.46, 0.48, 0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.62, 0.64, 0.66, 0.68, 0.70, 0.72, 0.74, 0.76, 0.78, 0.80, 0.82, 0.84, 0.86, 0.88, 0.90, 0.92, 0.94, 0.96, 0.98, 1.00, 1.02, 1.04, 1.06, 1.08, 1.10, 1.12, 1.14, 1.16, 1.18, 1.20, 1.22, 1.24, 1.26, 1.28, 1.30, 1.32, 1.34, 1.36, 1.38, 1.40, 1.42, 1.44, 1.46, 1.48, 1.50, 1.48, 1.46, 1.44, 1.42, 1.40, 1.38, 1.36, 1.34, 1.32, 1.30, 1.28, 1.26, 1.24, 1.22, 1.20, 1.18, 1.16, 1.14, 1.12, 1.10, 1.08, 1.06, 1.04, 1.02, 1.00, 0.98, 0.96, 0.94, 0.92, 0.90, 0.88, 0.86, 0.84, 0.82, 0.80, 0.78],
+      "tomorrow_valid": true,
+      "stored_at": "2026-03-06T00:00:00+01:00"
+    },
+    "2026-03-07": {
+      "today": [0.32, 0.34, 0.36, 0.38, 0.40, 0.42, 0.44, 0.46, 0.48, 0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.62, 0.64, 0.66, 0.68, 0.70, 0.72, 0.74, 0.76, 0.78, 0.80, 0.82, 0.84, 0.86, 0.88, 0.90, 0.92, 0.94, 0.96, 0.98, 1.00, 1.02, 1.04, 1.06, 1.08, 1.10, 1.12, 1.14, 1.16, 1.18, 1.20, 1.22, 1.24, 1.26, 1.28, 1.30, 1.32, 1.34, 1.36, 1.38, 1.40, 1.42, 1.44, 1.46, 1.48, 1.50, 1.48, 1.46, 1.44, 1.42, 1.40, 1.38, 1.36, 1.34, 1.32, 1.30, 1.28, 1.26, 1.24, 1.22, 1.20, 1.18, 1.16, 1.14, 1.12, 1.10, 1.08, 1.06, 1.04, 1.02, 1.00, 0.98, 0.96, 0.94, 0.92, 0.90, 0.88, 0.86, 0.35, 0.32, 0.30, 0.28],
+      "tomorrow": [0.26, 0.24, 0.22, 0.20, 0.18, 0.16, 0.15, 0.14, 0.13, 0.12, 0.11, 0.10, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.18, 0.20, 0.22, 0.24, 0.26, 0.28, 0.30, 0.32, 0.34, 0.36, 0.38, 0.40, 0.42, 0.44, 0.46, 0.48, 0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.62, 0.64, 0.66, 0.68, 0.70, 0.72, 0.74, 0.76, 0.78, 0.80, 0.82, 0.84, 0.86, 0.88, 0.90, 0.92, 0.94, 0.96, 0.98, 1.00, 1.02, 1.04, 1.06, 1.08, 1.10, 1.12, 1.14, 1.16, 1.18, 1.20, 1.22, 1.24, 1.26, 1.28, 1.30, 1.32, 1.34, 1.36, 1.38, 1.40, 1.42, 1.44, 1.46, 1.48, 1.50, 1.48, 1.46, 1.44, 1.42, 1.40, 1.38, 1.36, 1.34, 1.32, 1.30, 1.28],
+      "tomorrow_valid": true,
+      "stored_at": "2026-03-07T00:00:00+01:00"
+    },
+    "2026-03-08": {
+      "today": [0.26, 0.24, 0.22, 0.20, 0.18, 0.16, 0.15, 0.14, 0.13, 0.12, 0.11, 0.10, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.18, 0.20, 0.22, 0.24, 0.26, 0.28, 0.30, 0.32, 0.34, 0.36, 0.38, 0.40, 0.42, 0.44, 0.46, 0.48, 0.50, 0.52, 0.54, 0.56, 0.95, 1.10, 1.25, 1.40, 1.55, 1.70, 1.85, 2.00, 2.15, 2.30, 2.45, 2.60, 2.75, 2.70, 2.65, 2.60, 2.55, 2.50, 2.45, 2.40, 2.35, 2.30, 2.25, 2.20, 2.15, 2.10, 2.05, 2.00, 1.95, 1.90, 1.85, 1.80, 1.75, 1.70, 1.65, 1.60, 1.55, 1.50, 1.45, 1.40, 1.35, 1.30, 1.25, 1.20, 1.15, 1.10, 1.05, 1.00, 0.95, 0.90, 0.35, 0.32, 0.30, 0.28, 0.26, 0.24, 0.22, 0.20],
+      "tomorrow": [0.18, 0.16, 0.15, 0.14, 0.13, 0.12, 0.11, 0.10, 0.09, 0.08, 0.07, 0.08, 0.09, 0.10, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.18, 0.20, 0.22, 0.24, 0.26, 0.28, 0.30, 0.32, 0.34, 0.36, 0.38, 0.40, 0.42, 0.44, 0.46, 0.48, 0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.62, 0.64, 0.66, 0.68, 0.70, 0.72, 0.74, 0.76, 0.78, 0.80, 0.82, 0.84, 0.86, 0.88, 0.90, 0.92, 0.94, 0.96, 0.98, 1.00, 1.02, 1.04, 1.06, 1.08, 1.10, 1.12, 1.14, 1.16, 1.18, 1.20, 1.22, 1.24, 1.26, 1.28, 1.30, 1.32, 1.34, 1.36, 1.38, 1.40, 1.42, 1.44, 1.46, 1.48, 1.50, 1.48, 1.46, 1.44, 1.42, 1.40, 1.38, 1.36, 1.34, 1.32],
+      "tomorrow_valid": true,
+      "stored_at": "2026-03-08T00:00:00+01:00"
+    },
+    "2026-03-09": {
+      "today": [0.18, 0.16, 0.15, 0.14, 0.13, 0.12, 0.11, 0.10, 0.09, 0.08, 0.07, 0.08, 0.09, 0.10, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.18, 0.20, 0.22, 0.24, 0.26, 0.28, 0.30, 0.32, 0.34, 0.36, 0.38, 0.40, 0.42, 0.44, 0.46, 0.48, 0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.62, 0.64, 0.66, 0.68, 0.70, 0.72, 0.74, 0.76, 0.78, 0.80, 0.82, 0.84, 0.86, 0.88, 0.90, 0.92, 0.94, 0.96, 0.98, 1.00, 1.02, 1.04, 1.06, 1.08, 1.10, 1.12, 1.14, 1.16, 1.18, 1.20, 1.22, 1.24, 1.26, 1.28, 1.30, 1.32, 1.34, 1.36, 1.38, 1.40, 1.42, 1.44, 1.46, 1.48, 1.50, 1.48, 1.46, 1.44, 1.42, 1.40, 1.38, 1.36, 1.34, 1.32],
+      "tomorrow": [1.30, 1.28, 1.26, 1.24, 1.22, 1.20, 1.18, 1.16, 1.14, 1.12, 1.10, 1.08, 1.06, 1.04, 1.02, 1.00, 0.98, 0.96, 0.94, 0.92, 0.90, 0.88, 0.86, 0.84, 0.82, 0.80, 0.78, 0.76, 0.74, 0.72, 0.70, 0.68, 0.66, 0.64, 0.62, 0.60, 0.58, 0.56, 0.54, 0.52, 0.50, 0.48, 0.46, 0.44, 0.42, 0.40, 0.38, 0.36, 0.34, 0.32, 0.30, 0.28, 0.26, 0.24, 0.22, 0.20, 0.18, 0.16, 0.15, 0.14, 0.13, 0.12, 0.11, 0.10, 0.09, 0.08, 0.07, 0.06, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.18, 0.20, 0.22, 0.24, 0.26, 0.28, 0.30, 0.32, 0.34, 0.36, 0.38, 0.40, 0.42, 0.44, 0.46, 0.48],
+      "tomorrow_valid": true,
+      "stored_at": "2026-03-09T00:00:00+01:00"
+    }
+  }
+}

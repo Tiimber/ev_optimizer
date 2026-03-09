@@ -3,12 +3,16 @@
 Simulator for EV Optimizer debugging.
 
 This script takes a debug dump JSON (from the dump_debug_state service)
-and simulates the charging decision locally, showing the exact logic flow.
+or a snapshot export (from export_snapshots service) and simulates the 
+charging decision locally, showing the exact logic flow.
 
 Usage:
-    python3 simulate_from_dump.py debug_dump.json
+    # Single debug dump:    python3 simulate_from_dump.py debug_dump.json
     
-Or pipe directly:
+    # Snapshot export (timeline):
+    python3 simulate_from_dump.py ev_optimizer_debug_20260309_100000.json
+    
+    # From stdin:
     cat debug_dump.json | python3 simulate_from_dump.py -
 """
 
@@ -114,10 +118,118 @@ def simulate_from_dump(dump_data):
     print("=" * 80)
 
 
+def simulate_from_snapshots(export_data):
+    """Replay a scenario from snapshot export."""
+    print("=" * 80)
+    print("EV Optimizer - Snapshot Replay")
+    print("=" * 80)
+    
+    export_info = export_data['export_info']
+    snapshots = export_data['snapshots']
+    prices_by_date = export_data.get('prices', {})
+    
+    print(f"Export Created: {export_info['created_at']}")
+    print(f"Time Range: {export_info['start_time']} → {export_info['end_time']}")
+    print(f"Snapshots: {export_info['snapshot_count']}")
+    print()
+    
+    if not snapshots:
+        print("❌ No snapshots found in export!")
+        return
+    
+    print("📊 TIMELINE:")
+    print("-" * 80)
+    
+    for i, snapshot in enumerate(snapshots):
+        timestamp = snapshot['timestamp']
+        dt = datetime.fromisoformat(timestamp)
+        time_str = dt.strftime("%Y-%m-%d %H:%M")
+        
+        # Status indicators
+        charging = "🟢 CHARGING" if snapshot.get('should_charge_now') else "🔴 PAUSED"
+        plugged = "🔌" if snapshot.get('car_plugged') else "⚡"
+        
+        # Key metrics
+        soc = snapshot.get('car_soc', 0)
+        target = snapshot.get('planned_target_soc', 0)
+        available = snapshot.get('max_available_current', 0)
+        
+        print(f"\n[{i+1}/{len(snapshots)}] {time_str} {plugged} {charging}")
+        print(f"     SoC: {soc}% → {target}%  |  Available: {available}A")
+        
+        # Show summary (first 100 chars)
+        summary = snapshot.get('charging_summary', '')
+        if summary:
+            summary_short = summary[:100] + "..." if len(summary) > 100 else summary
+            print(f"     {summary_short}")
+        
+        # Show changes during this hour
+        changes = snapshot.get('changes_this_hour', [])
+        if changes:
+            print(f"     📝 {len(changes)} updates this hour")
+            
+            # Show actions if any
+            all_actions = []
+            for change in changes:
+                actions = change.get('actions', [])
+                all_actions.extend(actions)
+            
+            if all_actions:
+                print(f"     💡 Actions:")
+                for action in all_actions[:3]:  # Show first 3 actions
+                    print(f"        - {action}")
+                if len(all_actions) > 3:
+                    print(f"        ... and {len(all_actions) - 3} more")
+    
+    print()
+    print("-" * 80)
+    
+    # Summary statistics
+    charging_snapshots = sum(1 for s in snapshots if s.get('should_charge_now'))
+    paused_snapshots = len(snapshots) - charging_snapshots
+    
+    print(f"\n📈 SUMMARY:")
+    print(f"  Charging: {charging_snapshots}/{len(snapshots)} hours")
+    print(f"  Paused: {paused_snapshots}/{len(snapshots)} hours")
+    
+    # SoC progression
+    first_soc = snapshots[0].get('car_soc', 0)
+    last_soc = snapshots[-1].get('car_soc', 0)
+    soc_change = last_soc - first_soc
+    print(f"  SoC Change: {first_soc}% → {last_soc}% ({soc_change:+.1f}%)")
+    
+    # Calendar events
+    calendar_count = sum(1 for s in snapshots if s.get('calendar_events'))
+    if calendar_count > 0:
+        print(f"  Calendar Events: {calendar_count} snapshots had events")
+    
+    print()
+    print("=" * 80)
+    print("💡 TIP: Look for patterns in when charging was PAUSED")
+    print("    - Was it waiting for prices?")
+    print("    - Was available current too low?")
+    print("    - Was it outside the planned schedule?")
+    print("=" * 80)
+
+
+def detect_format(data):
+    """Detect if this is a snapshot export or a single debug dump."""
+    if 'export_info' in data and 'snapshots' in data:
+        return 'snapshot_export'
+    elif 'timestamp' in data and 'config_settings' in data:
+        return 'debug_dump'
+    else:
+        return 'unknown'
+
+
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python3 simulate_from_dump.py <debug_dump.json>")
-        print("   or: cat debug_dump.json | python3 simulate_from_dump.py -")
+        print("Usage: python3 simulate_from_dump.py <file.json>")
+        print("   or: cat file.json | python3 simulate_from_dump.py -")
+        print()
+        print("Supported formats:")
+        print("  - Debug dump (from dump_debug_state service)")
+        print("  - Snapshot export (from export_snapshots service)")
         sys.exit(1)
     
     # Read input
@@ -131,13 +243,28 @@ def main():
     
     # Parse JSON
     try:
-        dump_data = json.loads(data)
+        parsed_data = json.loads(data)
     except json.JSONDecodeError as e:
         print(f"❌ Error parsing JSON: {e}")
         sys.exit(1)
     
-    # Run simulation
-    simulate_from_dump(dump_data)
+    # Detect format and run appropriate simulation
+    format_type = detect_format(parsed_data)
+    
+    if format_type == 'snapshot_export':
+        print("Detected: Snapshot Export")
+        print()
+        simulate_from_snapshots(parsed_data)
+    elif format_type == 'debug_dump':
+        print("Detected: Debug Dump")
+        print()
+        simulate_from_dump(parsed_data)
+    else:
+        print(f"❌ Unknown file format!")
+        print("Expected either:")
+        print("  - Debug dump from dump_debug_state service")
+        print("  - Snapshot export from export_snapshots service")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
