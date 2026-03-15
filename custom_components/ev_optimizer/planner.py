@@ -119,10 +119,25 @@ def analyze_prices(raw_prices: list) -> str:
 def get_calendar_data(
     events: list, now: datetime
 ) -> tuple[datetime | None, float | None]:
-    """Check for relevant calendar event."""
+    """Check for relevant calendar event.
+    
+    In the early morning (midnight to 08:00), only look for events TODAY.
+    This prevents using tomorrow's calendar events when we should be charging
+    for today's manual departure time.
+    
+    After 08:00, can look ahead to tomorrow as usual.
+    """
     if not events:
         return None, None
-    limit = datetime.combine(now.date() + timedelta(days=1), time.max)
+    
+    # Before 08:00: only look at today's events to prevent using tomorrow's
+    # calendar events at midnight (which causes waiting for tomorrow's prices)
+    if now.hour < 8:
+        limit = datetime.combine(now.date(), time.max)
+    else:
+        # After 08:00: can look ahead to tomorrow
+        limit = datetime.combine(now.date() + timedelta(days=1), time.max)
+    
     sorted_events = sorted(events, key=lambda x: x.get("start"))
     for event in sorted_events:
         start_str = event.get("start")
@@ -407,30 +422,41 @@ def generate_charging_plan(
             _LOGGER.debug("🕐 Price horizon does NOT cover departure. Latest start: %s (now: %s)",
                           latest_start_dt.strftime("%H:%M"), now.strftime("%H:%M"))
             
-            # CRITICAL FIX: If departure is tomorrow AND we're early in current day (before 08:00)
-            # AND we have full prices for today, don't wait - plan with what we have.
-            # This prevents calendar events for tomorrow from blocking charging during the night.
-            # But if we're late in the day (e.g., afternoon), we should wait because the best
-            # charging time might be tonight (which requires tomorrow's prices).
-            end_of_today_threshold = datetime.combine(now.date(), time(23, 0, 0))
-            departure_is_tomorrow_or_later = dept_dt.date() > now.date()
-            have_prices_for_rest_of_today = last_price_end and last_price_end >= end_of_today_threshold
-            early_in_day = now.hour < 8  # Before 08:00
+            # CRITICAL: If departure is TODAY, NEVER wait for tomorrow's prices.
+            # Plan with whatever prices we have available.
+            departure_is_today = dept_dt.date() == now.date()
             
             should_wait_for_prices = False
-            if departure_is_tomorrow_or_later and have_prices_for_rest_of_today and early_in_day:
+            if departure_is_today:
                 _LOGGER.info(
-                    "📅 Departure is on %s (tomorrow+), but we're early in the day (hour %d) "
-                    "and have full prices for today (%s until %s). "
-                    "Planning with available data instead of waiting for tomorrow's prices.",
+                    "🚗 Departure is TODAY (%s at %s). Will NOT wait for tomorrow's prices. "
+                    "Planning with available data for today.",
                     dept_dt.strftime("%Y-%m-%d"),
-                    now.hour,
-                    now.strftime("%Y-%m-%d"),
-                    last_price_end.strftime("%Y-%m-%d %H:%M") if last_price_end else "unknown"
+                    dept_dt.strftime("%H:%M")
                 )
                 should_wait_for_prices = False
-            elif now < latest_start_dt:
-                should_wait_for_prices = True
+            else:
+                # Departure is tomorrow or later
+                # If we're early in the day (before 08:00) AND have full prices for today,
+                # don't wait - plan with what we have and charge during cheap night hours.
+                end_of_today_threshold = datetime.combine(now.date(), time(23, 0, 0))
+                departure_is_tomorrow_or_later = dept_dt.date() > now.date()
+                have_prices_for_rest_of_today = last_price_end and last_price_end >= end_of_today_threshold
+                early_in_day = now.hour < 8  # Before 08:00
+                
+                if departure_is_tomorrow_or_later and have_prices_for_rest_of_today and early_in_day:
+                    _LOGGER.info(
+                        "📅 Departure is on %s (tomorrow+), but we're early in the day (hour %d) "
+                        "and have full prices for today (%s until %s). "
+                        "Planning with available data instead of waiting for tomorrow's prices.",
+                        dept_dt.strftime("%Y-%m-%d"),
+                        now.hour,
+                        now.strftime("%Y-%m-%d"),
+                        last_price_end.strftime("%Y-%m-%d %H:%M") if last_price_end else "unknown"
+                    )
+                    should_wait_for_prices = False
+                elif now < latest_start_dt:
+                    should_wait_for_prices = True
             
             if should_wait_for_prices:
                 plan["should_charge_now"] = False

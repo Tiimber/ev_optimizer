@@ -479,14 +479,14 @@ def test_calendar_event_too_far_in_future_uses_default_time():
 
 
 def test_calendar_event_tomorrow_with_full_today_prices_should_plan():
-    """When calendar event is tomorrow but we have full prices for today,
-    planner should create a plan for today instead of waiting for tomorrow's prices.
+    """When calendar event is tomorrow morning and it's early in the day (before noon),
+    planner should use manual departure for TODAY and charge before that time.
     
-    This is the fix for the bug where car didn't charge overnight when calendar
-    event was the next morning.
+    This prevents using tomorrow's calendar events at midnight which causes the system
+    to wait for tomorrow's prices instead of charging overnight.
     """
     now = datetime(2026, 2, 22, 0, 0)  # Feb 22 midnight
-    # Calendar event tomorrow morning
+    # Calendar event tomorrow morning (should be IGNORED at midnight)
     calendar_event_feb23 = datetime(2026, 2, 23, 7, 5).isoformat()
     
     # Full day of prices for Feb 22 (96 quarter-hour slots until 23:45)
@@ -497,7 +497,7 @@ def test_calendar_event_tomorrow_with_full_today_prices_should_plan():
         const.ENTITY_TARGET_SOC: 80,
         const.ENTITY_SMART_SWITCH: True,
         const.ENTITY_MIN_SOC: 20,
-        const.ENTITY_DEPARTURE_TIME: time(7, 0),
+        const.ENTITY_DEPARTURE_TIME: time(7, 0),  # Manual: 07:00
         "car_soc": 57,
         "car_plugged": True,
         "calendar_events": [
@@ -521,12 +521,12 @@ def test_calendar_event_tomorrow_with_full_today_prices_should_plan():
     first_start = datetime.fromisoformat(first_active["start"])
     assert first_start.date().day == 22, "First charging slot should be on Feb 22 (today)"
     
-    # Departure should still be Feb 23 07:05 from calendar
+    # At midnight, should use manual departure (Feb 22 07:00), NOT tomorrow's calendar event
     departure_dt = datetime.fromisoformat(plan["departure_time"])
-    assert departure_dt.date().day == 23
+    assert departure_dt.date().day == 22, "Should use manual departure for today, not tomorrow's calendar"
     assert departure_dt.hour == 7
-    assert departure_dt.minute == 5
-    assert "(Calendar)" in plan["charging_summary"]
+    assert departure_dt.minute == 0
+    assert "(Manual)" in plan["charging_summary"] or "07:02" in plan["charging_summary"]
 
 
 def test_calendar_event_today_evening_should_not_wait():
@@ -564,4 +564,226 @@ def test_calendar_event_today_evening_should_not_wait():
     assert departure_dt.date().day == 22
     assert departure_dt.hour == 18
     assert "(Calendar)" in plan["charging_summary"]
+
+
+# ============================================================================
+# Regression tests for Saturday night charging failure (March 15, 2026)
+#
+# Bug: When it's Sunday morning at midnight and there's a Monday calendar event,
+# the system was using Monday's departure time instead of Sunday's manual departure.
+# This caused it to wait for Monday prices and never charge overnight.
+#
+# Fix: Before 08:00, only consider calendar events for TODAY.
+# Also: If departure is today, never wait for tomorrow's prices.
+# ============================================================================
+
+def test_saturday_night_with_monday_calendar_event_should_charge_before_sunday_departure():
+    """
+    Real-world scenario from March 15, 2026:
+    - Saturday night → Sunday morning (00:00)
+    - Manual departure: Sunday 07:02
+    - Calendar event exists: Monday 05:20
+    - Should use: Sunday 07:02 (manual), not Monday calendar
+    - Should charge: Before Sunday 07:02 in the cheapest available slots
+    """
+    now = datetime(2026, 3, 15, 0, 0)  # Sunday midnight
+    
+    # Calendar event for Monday morning (should be ignored at Sunday midnight)
+    calendar_event_monday = datetime(2026, 3, 16, 5, 20).isoformat()
+    
+    # Real Sunday March 15 prices (quarter-hour slots, 96 total)
+    # Night prices (00:00-07:00): 1.03-1.14 SEK
+    # Afternoon prices (13:00-15:00): 0.35-0.61 SEK (cheaper but after departure!)
+    sunday_prices = [
+        # 00:00-01:00
+        1.06, 1.04, 1.03, 1.03,
+        # 01:00-02:00
+        1.05, 1.06, 1.07, 1.07,
+        # 02:00-03:00
+        1.07, 1.09, 1.09, 1.10,
+        # 03:00-04:00
+        1.08, 1.09, 1.11, 1.11,
+        # 04:00-05:00
+        1.10, 1.11, 1.12, 1.12,
+        # 05:00-06:00
+        1.10, 1.12, 1.14, 1.12,
+        # 06:00-07:00
+        1.10, 1.11, 1.12, 1.12,
+        # 07:00-08:00 (after departure)
+        1.10, 1.11, 1.08, 1.09,
+        # Rest of morning
+        1.04, 1.04, 1.05, 1.01, 1.00, 0.99, 0.97, 0.94,  # 08:00-10:00
+        1.01, 0.99, 0.91, 0.90, 0.88, 0.85, 0.81, 0.75,  # 10:00-12:00
+        0.72, 0.68, 0.61, 0.54, 0.42, 0.38, 0.35, 0.35,  # 12:00-14:00
+        0.42, 0.42, 0.45, 0.49, 0.53, 0.54, 0.57, 0.61,  # 14:00-16:00
+        # Evening (fill rest with typical prices)
+        0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00, 1.05,  # 16:00-18:00
+        1.10, 1.15, 1.20, 1.18, 1.15, 1.12, 1.10, 1.08,  # 18:00-20:00
+        1.05, 1.02, 1.00, 0.98, 0.95, 0.92, 0.90, 0.88,  # 20:00-22:00
+        0.85, 0.80, 0.75, 0.70, 0.65, 0.60, 0.55, 0.50,  # 22:00-24:00
+    ]
+    
+    data = {
+        'price_data': {
+            'today': sunday_prices,
+            'tomorrow': [],  # No Monday prices available yet
+            'tomorrow_valid': False
+        },
+        const.ENTITY_TARGET_SOC: 80,
+        const.ENTITY_SMART_SWITCH: True,
+        const.ENTITY_MIN_SOC: 20,
+        const.ENTITY_DEPARTURE_TIME: time(7, 2),  # Manual: Sunday 07:02
+        'car_soc': 74.0,
+        'car_plugged': True,
+        'calendar_events': [
+            {'start': calendar_event_monday, 'summary': 'Work', 'description': ''}
+        ],
+    }
+    
+    config = {
+        'max_fuse': 20.0,
+        'charger_loss': 10.0,
+        'car_capacity': 64.0,
+        'has_price_sensor': True
+    }
+    
+    plan = planner.generate_charging_plan(data, config, manual_override=False, now=now)
+    
+    # 1. Should NOT wait for tomorrow's prices
+    assert "Waiting for additional price data" not in plan.get("charging_summary", ""), \
+        "Should not wait for Monday prices when departure is Sunday"
+    
+    # 2. Should use Sunday 07:02 as departure (manual), NOT Monday 05:20 (calendar)
+    departure_dt = datetime.fromisoformat(plan["departure_time"])
+    assert departure_dt.date().day == 15, \
+        f"Should use Sunday (15th) departure, got {departure_dt.strftime('%A %d')}"
+    assert departure_dt.hour == 7 and departure_dt.minute == 2, \
+        f"Should use manual departure 07:02, got {departure_dt.strftime('%H:%M')}"
+    
+    # 3. Should have active charging slots
+    schedule = plan.get("charging_schedule", [])
+    active_slots = [s for s in schedule if s.get("active", False)]
+    assert len(active_slots) > 0, "Should have scheduled charging slots"
+    
+    # 4. ALL charging slots must be BEFORE Sunday 07:02 (departure time)
+    for slot in active_slots:
+        slot_start = datetime.fromisoformat(slot["start"])
+        assert slot_start < departure_dt, \
+            f"Charging slot {slot_start.strftime('%H:%M')} is after departure {departure_dt.strftime('%H:%M')}"
+        assert slot_start.date().day == 15, \
+            f"Charging slot should be on Sunday (15th), got {slot_start.strftime('%A %d')}"
+    
+    # 5. First charging slot should be during the night (before 07:00)
+    first_slot = active_slots[0]
+    first_start = datetime.fromisoformat(first_slot["start"])
+    assert first_start.hour < 7, \
+        f"First charging slot should be during the night, got {first_start.strftime('%H:%M')}"
+    
+    # 6. Verify it would actually charge the car to target
+    # Need ~6% SoC = 6% of 64 kWh = 3.84 kWh needed
+    # With 10% loss, need to pull ~4.3 kWh
+    # At ~11 kW power, needs ~0.4 hours = ~24 minutes = 2 quarter-hour slots
+    assert len(active_slots) >= 2, \
+        f"Should have at least 2 charging slots (30 min) to charge from 74% to 80%, got {len(active_slots)}"
+
+
+def test_saturday_afternoon_with_monday_calendar_should_use_manual_until_sunday_evening():
+    """
+    Related scenario: Saturday afternoon at 14:00
+    - Manual departure: 07:02 (would roll to Sunday 07:02)
+    - Calendar event: Monday 05:20 (too far in future, beyond tomorrow)
+    - Should use: Sunday 07:02 (manual rolled forward)
+    
+    Note: Calendar lookup only goes until end of tomorrow (Sunday).
+    On Sunday evening, the Monday calendar event would become visible.
+    """
+    now = datetime(2026, 3, 14, 14, 0)  # Saturday afternoon
+    
+    calendar_event_monday = datetime(2026, 3, 16, 5, 20).isoformat()
+    
+    # Saturday prices
+    saturday_prices = [0.9] * 96
+    
+    data = {
+        'price_data': {
+            'today': saturday_prices,
+            'tomorrow': [],  # No Sunday prices yet
+            'tomorrow_valid': False
+        },
+        const.ENTITY_TARGET_SOC: 80,
+        const.ENTITY_SMART_SWITCH: True,
+        const.ENTITY_MIN_SOC: 20,
+        const.ENTITY_DEPARTURE_TIME: time(7, 2),
+        'car_soc': 74.0,
+        'car_plugged': True,
+        'calendar_events': [
+            {'start': calendar_event_monday, 'summary': 'Work', 'description': ''}
+        ],
+    }
+    
+    config = {
+        'max_fuse': 20.0,
+        'charger_loss': 10.0,
+        'car_capacity': 64.0,
+        'has_price_sensor': True
+    }
+    
+    plan = planner.generate_charging_plan(data, config, manual_override=False, now=now)
+    
+    # At Saturday afternoon, Monday event is beyond tomorrow's cutoff
+    # Should use manual departure rolled to Sunday 07:02
+    departure_dt = datetime.fromisoformat(plan["departure_time"])
+    assert departure_dt.date().day == 15, \
+        f"Should use Sunday (15th) manual departure, got {departure_dt.strftime('%A %d')}"
+    assert departure_dt.hour == 7 and departure_dt.minute == 2, \
+        f"Should use manual 07:02, got {departure_dt.strftime('%H:%M')}"
+
+
+def test_sunday_evening_with_monday_calendar_should_use_calendar():
+    """
+    On Sunday evening, the Monday calendar event is now within tomorrow's range.
+    Should use Monday 05:20 from calendar.
+    
+    With Monday departure and missing Monday prices, but plenty of time left,
+    it's OK to wait for prices (they normally arrive at 13:00-15:00).
+    """
+    now = datetime(2026, 3, 15, 20, 0)  # Sunday evening
+    
+    calendar_event_monday = datetime(2026, 3, 16, 5, 20).isoformat()
+    
+    # Sunday evening prices
+    sunday_prices = [0.9] * 96
+    
+    data = {
+        'price_data': {
+            'today': sunday_prices,
+            'tomorrow': [],  # No Monday prices yet (unusual!)
+            'tomorrow_valid': False
+        },
+        const.ENTITY_TARGET_SOC: 80,
+        const.ENTITY_SMART_SWITCH: True,
+        const.ENTITY_MIN_SOC: 20,
+        const.ENTITY_DEPARTURE_TIME: time(7, 2),
+        'car_soc': 74.0,
+        'car_plugged': True,
+        'calendar_events': [
+            {'start': calendar_event_monday, 'summary': 'Work', 'description': ''}
+        ],
+    }
+    
+    config = {
+        'max_fuse': 20.0,
+        'charger_loss': 10.0,
+        'car_capacity': 64.0,
+        'has_price_sensor': True
+    }
+    
+    plan = planner.generate_charging_plan(data, config, manual_override=False, now=now)
+    
+    # On Sunday evening, Monday calendar event is now visible (within tomorrow)
+    departure_dt = datetime.fromisoformat(plan["departure_time"])
+    assert departure_dt.date().day == 16, \
+        f"Should use Monday (16th) calendar event, got {departure_dt.strftime('%A %d')}"
+    assert departure_dt.hour == 5 and departure_dt.minute == 20, \
+        f"Should use calendar 05:20, got {departure_dt.strftime('%H:%M')}"
 
