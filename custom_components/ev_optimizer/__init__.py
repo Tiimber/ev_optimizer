@@ -72,11 +72,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         end_time = call.data.get("end_time")
         output_format = call.data.get("output_format", "json")
         
-        # Parse ISO datetime strings if provided
+        # Parse ISO datetime strings if provided and make timezone-aware
         if start_time:
             start_time = datetime.fromisoformat(start_time)
+            # Make timezone-aware using Home Assistant's timezone
+            if start_time.tzinfo is None:
+                start_time = dt_util.as_local(start_time)
         if end_time:
             end_time = datetime.fromisoformat(end_time)
+            # Make timezone-aware using Home Assistant's timezone
+            if end_time.tzinfo is None:
+                end_time = dt_util.as_local(end_time)
         
         file_path = await coordinator.snapshot_manager.export_snapshots(
             start_time=start_time,

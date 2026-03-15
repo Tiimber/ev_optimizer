@@ -289,6 +289,12 @@ class SnapshotManager:
         if end_time is None:
             end_time = dt_util.now()
         
+        # Ensure timezone-aware for comparison using Home Assistant's timezone
+        if start_time.tzinfo is None:
+            start_time = dt_util.as_local(start_time)
+        if end_time.tzinfo is None:
+            end_time = dt_util.as_local(end_time)
+        
         # Filter snapshots
         filtered_snapshots = [
             s for s in self.snapshots
