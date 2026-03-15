@@ -164,6 +164,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         # Overload prevention tracking
         self._last_overload_check_time = None
 
+        # Automatic image generation tracking
+        self._last_plan_image_signature = None
+        self._last_report_generated = False
+
         # Persistence
         self.store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
         self._data_loaded = False
@@ -477,6 +481,85 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         )
         self._add_log("Plan Image Generated")
 
+    def _get_plan_signature(self, plan: dict) -> str:
+        """Generate a signature from a plan to detect meaningful changes.
+        
+        This helps avoid regenerating the same plan image multiple times.
+        Signature includes: departure time, target SoC, charging schedule slots, summary.
+        """
+        import hashlib
+        import json
+        
+        # Extract key fields that define a unique plan
+        signature_data = {
+            "departure_time": plan.get("departure_time", ""),
+            "planned_target_soc": plan.get("planned_target_soc", 0),
+            "charging_summary": plan.get("charging_summary", ""),
+            "should_charge_now": plan.get("should_charge_now", False),
+            # Include charging schedule (simplified to start times and active status)
+            "schedule": [
+                {"start": slot.get("start", ""), "active": slot.get("active", False)}
+                for slot in plan.get("charging_schedule", [])
+            ]
+        }
+        
+        # Create hash of the signature data
+        signature_str = json.dumps(signature_data, sort_keys=True)
+        return hashlib.md5(signature_str.encode()).hexdigest()
+
+    async def _auto_generate_plan_image_if_needed(self, plan: dict, is_locked: bool):
+        """Automatically generate plan image when appropriate.
+        
+        Generates image when:
+        - Car is plugged in
+        - Plan is newly generated (not from locked state)
+        - Plan is not waiting for prices
+        - Plan has actually changed (different signature)
+        """
+        # Don't generate for locked plans (charging already started, no changes)
+        if is_locked:
+            return
+        
+        # Don't generate if waiting for prices (incomplete plan)
+        is_waiting = "Waiting for additional price data" in plan.get("charging_summary", "")
+        if is_waiting:
+            _LOGGER.debug("⏭️  Skipping plan image: waiting for prices")
+            return
+        
+        # Don't generate if no charging schedule (nothing to show)
+        if "charging_schedule" not in plan or not plan["charging_schedule"]:
+            return
+        
+        # Check if plan has changed
+        current_signature = self._get_plan_signature(plan)
+        if current_signature == self._last_plan_image_signature:
+            _LOGGER.debug("⏭️  Skipping plan image: plan unchanged")
+            return
+        
+        # Generate the image
+        try:
+            _LOGGER.info("📸 Auto-generating plan image (plan changed)")
+            
+            # Inject fee settings
+            data_with_fees = self.data.copy() if self.data else plan.copy()
+            data_with_fees.update(plan)
+            data_with_fees[ENTITY_PRICE_EXTRA_FEE] = self.user_settings.get(
+                ENTITY_PRICE_EXTRA_FEE, 0.0
+            )
+            data_with_fees[ENTITY_PRICE_VAT] = self.user_settings.get(ENTITY_PRICE_VAT, 0.0)
+
+            save_path = self.hass.config.path("www", "ev_optimizer_plan.png")
+            await self.hass.async_add_executor_job(
+                generate_plan_image, data_with_fees, save_path
+            )
+            
+            # Update signature to avoid regenerating
+            self._last_plan_image_signature = current_signature
+            self._add_log("Plan Image Auto-Generated")
+            
+        except Exception as e:
+            _LOGGER.warning(f"Could not auto-generate plan image: {e}")
+
     async def _async_update_data(self):
         """Update data via library."""
         start_time = perf_counter()
@@ -556,6 +639,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 plan = self._locked_plan.copy()
                 # Update should_charge_now based on current time and schedule
                 plan = self._update_locked_plan_status(plan)
+                plan_is_locked = True
             else:
                 # Generate new plan
                 plan = generate_charging_plan(
@@ -564,6 +648,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                     overload_prevention_minutes=self.session_manager.overload_prevention_minutes,
                     expected_price_time=expected_price_time
                 )
+                plan_is_locked = False
                 
                 # Lock the plan when charging starts for the first time
                 # BUT: Don't lock "waiting for prices" plans - they need to be regenerated when prices arrive
@@ -575,6 +660,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                         "🔒 Locking charging plan at %.1f%% SoC (plan will remain stable until SoC updates)",
                         self._locked_plan_soc
                     )
+                
+                # Auto-generate plan image when car is plugged and plan is ready
+                if data.get("car_plugged", False):
+                    await self._auto_generate_plan_image_if_needed(plan, is_locked=False)
 
             # Handle Buffer Logic (stateful, so stays in coordinator)
             # Update scheduled end when we're waiting to charge
@@ -1338,6 +1427,9 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             # Reset overload prevention timer for new session
             self._last_overload_check_time = None
             
+            # Reset automatic image generation tracking for new session
+            self._last_plan_image_signature = None
+            
             # If we missed a session finalization, it's too late now, start fresh.
             try:
                 # Reset inputs to defaults
@@ -1358,6 +1450,9 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         if not is_plugged and self.previous_plugged_state:
             self._finalize_session(final_soc=data.get("car_soc"))
             self.manual_override_active = False
+            
+            # Clear image generation tracking for next session
+            self._last_plan_image_signature = None
             
             # Clear locked plan when car unplugs
             self._locked_plan = None
@@ -1410,12 +1505,14 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         
         if report:
             try:
+                _LOGGER.info("📸 Auto-generating session report image (car unplugged)")
                 save_path = self.hass.config.path(
                     "www", "ev_optimizer_last_session.png"
                 )
                 self.hass.async_add_executor_job(generate_report_image, report, save_path)
+                self._add_log("Session Report Image Auto-Generated")
             except Exception as e:
-                _LOGGER.warning(f"Could not trigger image generation: {e}")
+                _LOGGER.warning(f"Could not auto-generate report image: {e}")
     
     def dump_debug_state(self) -> dict:
         """Dump complete state for debugging/simulation purposes.
