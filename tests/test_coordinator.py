@@ -397,3 +397,138 @@ def test_virtual_soc_trusts_sensor_when_not_charging(pkg_loader, hass_mock):
     
     # Virtual SoC should trust lower sensor when not charging
     assert coord._virtual_soc == 75.0, "Should trust sensor when not charging, even if lower"
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for the two May 2026 charging failures.
+# ---------------------------------------------------------------------------
+
+def _make_coordinator_for_regression(pkg_loader, hass_mock):
+    """Helper: create a minimal coordinator suitable for regression testing."""
+    from datetime import timedelta
+    const = pkg_loader("const")
+    coordinator_mod = pkg_loader("coordinator")
+
+    class State:
+        def __init__(self, state):
+            self.state = state
+
+    hass_mock.states = type("S", (), {
+        "get": lambda self, e: State("0") if e else None
+    })()
+
+    entry = type("E", (), {
+        "entry_id": "regression",
+        "data": {
+            const.CONF_CAR_SOC_SENSOR: "sensor.car_soc",
+            const.CONF_MAX_FUSE: const.DEFAULT_MAX_FUSE,
+            const.CONF_CHARGER_LOSS: const.DEFAULT_LOSS,
+            const.CONF_CAR_CAPACITY: const.DEFAULT_CAPACITY,
+        },
+        "options": {},
+    })()
+
+    coord = coordinator_mod.EVSmartChargerCoordinator(hass_mock, entry)
+    coord._startup_time = datetime.now() - timedelta(minutes=10)
+    coord._last_update_time = datetime.now() - timedelta(seconds=30)
+    coord.car_capacity = const.DEFAULT_CAPACITY
+    return coord
+
+
+def test_sensor_soc_update_detected_on_large_drop(pkg_loader, hass_mock):
+    """Regression test for Bug 2 (May 17-18 2026).
+
+    When the SoC sensor drops from 85% → 41% (BMS recalibration) while the
+    coordinator is in maintenance mode, _last_sensor_soc must change so the
+    caller can detect ``sensor_soc_updated = True`` and unlock the locked plan.
+
+    Before the fix the comparison used the ALREADY-UPDATED _last_sensor_soc vs
+    the ALREADY-UPDATED data["car_soc"] (which equals virtual_soc), giving a
+    diff of 0 — so the plan was never unlocked.
+    """
+    coord = _make_coordinator_for_regression(pkg_loader, hass_mock)
+
+    # Simulate state: car in maintenance mode, sensor was last read at 85%
+    coord._last_applied_state = "maintenance"
+    coord._virtual_soc = 85.0
+    coord._last_sensor_soc = 85.0
+
+    # Sensor suddenly drops to 41% (BMS recalibration / bad reading correction)
+    prev_sensor_soc = coord._last_sensor_soc  # save BEFORE calling _update_virtual_soc
+    coord._update_virtual_soc({"car_soc": 41.0, "ch_l1": 0.0, "ch_l2": 0.0, "ch_l3": 0.0})
+
+    # _last_sensor_soc must have changed so the caller's comparison detects the update
+    assert abs(coord._last_sensor_soc - prev_sensor_soc) > 0.5, (
+        "After a 44% SoC drop _last_sensor_soc must change by more than 0.5% "
+        "so sensor_soc_updated can be detected by comparing prev vs new value"
+    )
+    # virtual_soc must also follow the sensor (large real-sensor change)
+    assert coord._virtual_soc == 41.0, (
+        "virtual_soc must be updated to 41% after a genuine sensor drop of 44%"
+    )
+
+
+def test_sensor_soc_update_detected_on_soc_rise_during_charging(pkg_loader, hass_mock):
+    """Regression test for Bug 1 (May 15-16 2026).
+
+    After a charging slot expires the plan needs to regenerate to pick the next
+    slot. This requires detecting that the SoC actually rose (87% → 90.6%).
+
+    Before the fix, _last_sensor_soc was updated inside _update_virtual_soc
+    before the coordinator compared it, so the diff was always 0 and the plan
+    stayed locked with no more slots.
+    """
+    coord = _make_coordinator_for_regression(pkg_loader, hass_mock)
+
+    coord._last_applied_state = "charging"
+    coord._virtual_soc = 87.0
+    coord._last_sensor_soc = 87.0
+
+    # Sensor updates to 90.6% as charging completes one slot
+    prev_sensor_soc = coord._last_sensor_soc
+    coord._update_virtual_soc({"car_soc": 90.6, "ch_l1": 0.0, "ch_l2": 0.0, "ch_l3": 0.0})
+
+    assert abs(coord._last_sensor_soc - prev_sensor_soc) > 0.5, (
+        "After a 3.6% SoC rise _last_sensor_soc must change by more than 0.5% "
+        "so the caller can set sensor_soc_updated=True and unlock the locked plan"
+    )
+    assert coord._virtual_soc == 90.6, (
+        "virtual_soc must follow the sensor when it reports a genuine increase"
+    )
+
+
+def test_maintenance_lock_cleared_when_soc_below_target(pkg_loader, hass_mock):
+    """Regression test for Bug 2 safety net.
+
+    Even if sensor_soc_updated isn't detected (e.g., sensor didn't change since
+    the last reading), the coordinator must clear the locked plan when it says
+    'Target reached' but virtual_soc has fallen more than 5% below the target.
+    This prevents the car sitting at 41% all night while the summary still says
+    'Target reached (80%)'.
+    """
+    coord = _make_coordinator_for_regression(pkg_loader, hass_mock)
+
+    # Locked plan: maintenance mode thinks target is reached
+    coord._locked_plan = {
+        "planned_target_soc": 80.0,
+        "charging_summary": "Target reached (85%). Maintenance mode active.",
+        "should_charge_now": True,
+        "charging_schedule": [],
+    }
+    coord._locked_plan_soc = 85.0
+    coord._virtual_soc = 41.0  # SoC dropped back after BMS recalibration
+
+    locked_target = float(coord._locked_plan.get("planned_target_soc", 0))
+    locked_summary = coord._locked_plan.get("charging_summary", "")
+
+    # This is the safety condition added to coordinator._async_update_data
+    safety_should_clear = (
+        "Target reached" in locked_summary
+        and coord._virtual_soc < locked_target - 5
+    )
+
+    assert safety_should_clear, (
+        "Safety check must trigger when 'Target reached' is in summary but "
+        f"virtual_soc ({coord._virtual_soc}%) is > 5% below target ({locked_target}%)"
+    )
+

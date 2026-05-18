@@ -596,6 +596,9 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                     _LOGGER.warning(f"Failed to fetch calendar events: {e}")
 
             await self._handle_plugged_event(data["car_plugged"], data)
+            # Save last_sensor_soc BEFORE _update_virtual_soc modifies it, so we can detect
+            # real sensor changes after the fact (the function updates _last_sensor_soc internally).
+            _prev_sensor_soc = self._last_sensor_soc
             trust_sensor_period = self._update_virtual_soc(data)
             data["car_soc"] = self._virtual_soc
             data["soc_sensor_refresh"] = trust_sensor_period
@@ -609,15 +612,19 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             # Get expected price arrival time from learning
             expected_price_time = self._get_expected_price_arrival_time()
 
-            # Check if sensor SoC has actually updated (unlock plan if it has)
+            # Check if sensor SoC has actually updated (unlock plan if it has).
+            # Compare the sensor value BEFORE _update_virtual_soc ran (_prev_sensor_soc)
+            # against the sensor value AFTER (_last_sensor_soc). Both are set by
+            # _update_virtual_soc, so comparing them correctly detects a real sensor change.
+            # (The old approach compared data["car_soc"] == _virtual_soc against _last_sensor_soc,
+            # both of which were already updated to the same value, so the diff was always 0.)
             sensor_soc_updated = False
-            if self._last_sensor_soc is not None:
-                current_sensor = data.get("car_soc", 0.0)
-                if abs(current_sensor - self._last_sensor_soc) > 0.5:  # >0.5% change
+            if _prev_sensor_soc is not None and self._last_sensor_soc is not None:
+                if abs(self._last_sensor_soc - _prev_sensor_soc) > 0.5:  # >0.5% change
                     sensor_soc_updated = True
                     _LOGGER.info(
                         "🔓 SoC sensor updated (%.1f%% → %.1f%%), unlocking plan",
-                        self._last_sensor_soc, current_sensor
+                        _prev_sensor_soc, self._last_sensor_soc
                     )
                     self._locked_plan = None
                     self._locked_plan_soc = None
@@ -630,6 +637,22 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                     _LOGGER.info("🔓 Locked plan is waiting for prices - unlocking to regenerate")
                     self._locked_plan = None
                     self._locked_plan_soc = None
+
+            # Safety: if locked plan says "Target reached" but virtual_soc is significantly
+            # below the target, the SoC sensor must have corrected downward (BMS recalibration
+            # or a stale sensor). Clear the lock so a proper charge plan is generated.
+            if self._locked_plan is not None:
+                locked_target = float(self._locked_plan.get("planned_target_soc", 0))
+                locked_summary = self._locked_plan.get("charging_summary", "")
+                if "Target reached" in locked_summary and self._virtual_soc < locked_target - 5:
+                    _LOGGER.warning(
+                        "⚠️ Locked plan says 'Target reached' but virtual_soc %.1f%% is "
+                        "%.1f%% below target %.1f%% — clearing stale maintenance lock",
+                        self._virtual_soc, locked_target - self._virtual_soc, locked_target,
+                    )
+                    self._locked_plan = None
+                    self._locked_plan_soc = None
+                    sensor_soc_updated = True
 
             if self._locked_plan is not None and not sensor_soc_updated:
                 _LOGGER.debug(
