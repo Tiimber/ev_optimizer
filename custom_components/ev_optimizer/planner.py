@@ -410,7 +410,7 @@ def generate_charging_plan(
         hours_needed = kwh_to_pull / est_power_kw
         
         _LOGGER.debug("⚡ Energy calculation: kwh_needed=%.2f, efficiency=%.2f (%.1f%% loss), kwh_to_pull=%.2f",
-                      kwh_needed, efficiency, kwh_to_pull)
+                      kwh_needed, efficiency, effective_loss, kwh_to_pull)
         _LOGGER.debug("⏱️  Timing: est_power=%.2f kW, hours_needed=%.2f, overload_prevention_min=%.1f",
                       est_power_kw, hours_needed, overload_prevention_minutes)
 

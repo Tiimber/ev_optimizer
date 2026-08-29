@@ -109,19 +109,20 @@ def test_planner_says_wait_evening_charge_midnight(pkg_loader):
     # This test is covered by test_dump_charging_scenario.py
     # Here we just verify those tests exist and pass
     import subprocess
+    import sys
     from pathlib import Path
     
     # Get the repo root (parent of tests/ directory)
     repo_root = Path(__file__).parent.parent
     
     result = subprocess.run(
-        ["python3", "-m", "pytest", 
-         "tests/test_dump_charging_scenario.py::test_jan_31_1828_dump_says_wait_for_midnight", 
+        [sys.executable, "-m", "pytest",
+         "tests/test_dump_charging_scenario.py::test_jan_31_1828_dump_says_wait_for_midnight",
          "-v"],
         cwd=str(repo_root),
         capture_output=True, text=True
     )
-    assert "PASSED" in result.stdout, (
+    assert result.returncode == 0, (
         f"Planner tests failed. Output:\n{result.stdout}\n{result.stderr}"
     )
     print("✅ Planner tests PASS - wait/charge logic is correct")
@@ -134,17 +135,18 @@ def test_planner_reaches_80_percent_by_departure(pkg_loader):
     """
     # This test is covered by test_dump_charging_scenario.py
     import subprocess
+    import sys
     from pathlib import Path
     
     # Get the repo root (parent of tests/ directory)
     repo_root = Path(__file__).parent.parent
     
     result = subprocess.run(
-        ["python3", "-m", "pytest", "tests/test_dump_charging_scenario.py", "-v"],
+        [sys.executable, "-m", "pytest", "tests/test_dump_charging_scenario.py", "-v"],
         cwd=str(repo_root),
         capture_output=True, text=True
     )
-    assert "5 passed" in result.stdout, (
-        f"Dump scenario tests failed. Output:\n{result.stdout[-500:]}"
+    assert result.returncode == 0, (
+        f"Dump scenario tests failed. Output:\n{result.stdout[-1500:]}"
     )
     print("✅ All 5 planner scenario tests PASS")
