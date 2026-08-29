@@ -1,5 +1,7 @@
 """Time platform for EV Optimizer."""
 from datetime import time
+import logging
+
 from homeassistant.components.time import TimeEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -14,6 +16,9 @@ from .const import (
     ENTITY_DEBUG_DEPARTURE_TIME,
 )
 from .coordinator import EVSmartChargerCoordinator
+
+_LOGGER = logging.getLogger(__name__)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -98,8 +103,11 @@ class EVDepartureOverride(CoordinatorEntity, TimeEntity):
                 try:
                     parts = override.split(":")
                     return time(int(parts[0]), int(parts[1]))
-                except:
-                    pass
+                except (ValueError, IndexError):
+                    _LOGGER.error(
+                        "Stored departure override %r is not a valid time; "
+                        "falling back to the standard departure time", override
+                    )
             elif isinstance(override, time):
                 return override
         # Fall back to standard departure time

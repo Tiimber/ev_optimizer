@@ -360,7 +360,9 @@ def generate_report_image(report: dict, file_path: str):
                     fill="black",
                 )
         except Exception:
-            pass
+            # Non-blocking: a missing axis label must not cost us the whole
+            # plan image, which is the main diagnostic for a charging session.
+            _LOGGER.error("Failed to draw plan graph axis labels", exc_info=True)
 
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     img.save(file_path)

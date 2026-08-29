@@ -140,6 +140,12 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         self._last_applied_amps = -1
         self._last_applied_state = None  # "charging" or "paused"
         self._last_applied_car_limit = -1
+        # Diagnostics for the two ways this integration can silently drift
+        # from reality: a car limit we believe we set but the car did not
+        # take, and an amp reading we substitute when the car stops drawing.
+        self._car_limit_drift_logged = False
+        self._amps_fallback_since = None
+        self._amps_fallback_logged = False
 
         # Virtual SoC Estimator
         self._virtual_soc = 0.0
@@ -599,6 +605,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             # Save last_sensor_soc BEFORE _update_virtual_soc modifies it, so we can detect
             # real sensor changes after the fact (the function updates _last_sensor_soc internally).
             _prev_sensor_soc = self._last_sensor_soc
+            self._check_car_limit_drift()
             trust_sensor_period = self._update_virtual_soc(data)
             data["car_soc"] = self._virtual_soc
             data["soc_sensor_refresh"] = trust_sensor_period
@@ -859,8 +866,11 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             if isinstance(last_refresh_str, str):
                 try:
                     last_refresh = datetime.fromisoformat(last_refresh_str)
-                except Exception:
-                    pass
+                except ValueError:
+                    _LOGGER.error(
+                        "Could not parse stored last_refresh %r; treating the "
+                        "plan as stale", last_refresh_str,
+                    )
             elif isinstance(last_refresh_str, datetime):
                 last_refresh = last_refresh_str
         
@@ -1068,6 +1078,42 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         locked_plan["should_charge_now"] = should_charge
         return locked_plan
 
+    def _check_car_limit_drift(self):
+        """Warn when the car's reported charge limit disagrees with the one
+        we believe we applied.
+
+        Setting the limit is fire-and-forget: a successful service call only
+        means Home Assistant accepted it, not that the car did. The virtual
+        SoC clamp uses _last_applied_car_limit, so a silent disagreement lets
+        the estimate run above the car's real ceiling.
+        """
+        entity_id = self.conf_keys.get("car_limit")
+        if not entity_id or self._last_applied_car_limit <= 0:
+            return
+        state_obj = self.hass.states.get(entity_id)
+        if state_obj is None or state_obj.state in [STATE_UNAVAILABLE, STATE_UNKNOWN]:
+            return
+        try:
+            actual = float(state_obj.state)
+        except (TypeError, ValueError):
+            return
+
+        drifted = abs(actual - self._last_applied_car_limit) > 0.5
+        if drifted == self._car_limit_drift_logged:
+            return  # only log the transitions, not every cycle
+        self._car_limit_drift_logged = drifted
+        if drifted:
+            _LOGGER.error(
+                "Car charge limit mismatch: we applied %s%% but %s reports "
+                "%s%%. The virtual SoC clamp uses the applied value, so the "
+                "estimate may run above the car's real limit.",
+                self._last_applied_car_limit, entity_id, actual,
+            )
+        else:
+            _LOGGER.info(
+                "Car charge limit now agrees with %s at %s%%", entity_id, actual
+            )
+
     def _update_virtual_soc(self, data: dict):
         current_time = datetime.now()
         sensor_soc = data.get("car_soc")
@@ -1142,6 +1188,30 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             used_amps = (
                 measured_amps if measured_amps > 0.5 else self._last_applied_amps
             )
+
+            # The fallback to the *commanded* current exists because the
+            # charger's per-phase sensors can lag. But if the car has simply
+            # stopped accepting charge (it hit its own limit, or ended the
+            # session) the measured current stays near zero indefinitely,
+            # and every cycle from then on adds energy that never flowed.
+            if measured_amps > 0.5:
+                self._amps_fallback_since = None
+                self._amps_fallback_logged = False
+            elif self._last_applied_amps > 0:
+                if self._amps_fallback_since is None:
+                    self._amps_fallback_since = current_time
+                elif (
+                    not self._amps_fallback_logged
+                    and current_time - self._amps_fallback_since > timedelta(minutes=5)
+                ):
+                    self._amps_fallback_logged = True
+                    _LOGGER.error(
+                        "Charger has measured <0.5A for over 5 minutes while %sA "
+                        "was commanded; the virtual SoC is still being advanced "
+                        "using the commanded value and may now be too high. "
+                        "Measured phases: %.2f/%.2f/%.2f A",
+                        self._last_applied_amps, ch_l1, ch_l2, ch_l3,
+                    )
 
             if used_amps > 0:
                 seconds_passed = (current_time - self._last_update_time).total_seconds()
@@ -1221,7 +1291,13 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                     self._last_applied_car_limit = target_soc
                     self._add_log(f"Set Car Limit: {target_soc}%")
                 except Exception:
-                    pass
+                    # Non-blocking: the charge plan is still valid without the
+                    # car limit. But it must not fail silently — the virtual
+                    # SoC clamp trusts _last_applied_car_limit.
+                    _LOGGER.error(
+                        "Failed to set car charge limit to %s%% via %s",
+                        target_soc, self.conf_keys["car_limit"], exc_info=True,
+                    )
             elif self.conf_keys.get("car_svc") and self.conf_keys.get("car_target_ent"):
                 try:
                     full = self.conf_keys["car_svc"]
@@ -1468,7 +1544,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 if self.conf_keys.get("zap_switch") and self.conf_keys.get("zap_resume"):
                     pass # Keep existing logic logic if present
             except Exception:
-                pass
+                _LOGGER.error("Failed to reset session state on plug-in", exc_info=True)
 
         if not is_plugged and self.previous_plugged_state:
             self._finalize_session(final_soc=data.get("car_soc"))
@@ -1502,8 +1578,11 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                         {"entity_id": self.conf_keys["zap_switch"]},
                         blocking=True,
                     )
-                except:
-                    pass
+                except Exception:
+                    _LOGGER.error(
+                        "Failed to turn off charger switch %s",
+                        self.conf_keys["zap_switch"], exc_info=True,
+                    )
             self._last_applied_state = "paused"
             self._last_applied_car_limit = -1
             self._last_scheduled_end = None

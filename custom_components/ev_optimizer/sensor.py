@@ -1,6 +1,8 @@
 """Sensor platform for EV Optimizer."""
 import math
 from datetime import datetime
+import logging
+
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -9,6 +11,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, LEARNING_CHARGER_LOSS, LEARNING_CONFIDENCE, LEARNING_SESSIONS, LEARNING_LOCKED, LEARNING_HISTORY
 from .coordinator import EVSmartChargerCoordinator
+
+_LOGGER = logging.getLogger(__name__)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -182,8 +187,10 @@ class EVDebugDumpPathSensor(EVSmartChargerBaseSensor):
                 stat = os.stat(file_path)
                 attrs["file_size_bytes"] = stat.st_size
                 attrs["last_modified"] = datetime.fromtimestamp(stat.st_mtime).isoformat()
-            except:
-                pass
+            except OSError:
+                _LOGGER.error(
+                    "Could not stat debug dump %s", file_path, exc_info=True
+                )
         
         return attrs
 

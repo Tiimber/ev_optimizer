@@ -165,6 +165,9 @@ def get_calendar_data(
             )
             return evt_start, target_soc
         except ValueError:
+            _LOGGER.warning(
+                "Skipping calendar event with unparseable start %r", start_str
+            )
             continue
     return None, None
 
