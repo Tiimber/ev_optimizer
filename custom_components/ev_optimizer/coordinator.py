@@ -101,6 +101,11 @@ from .snapshot_manager import SnapshotManager
 
 _LOGGER = logging.getLogger(__name__)
 
+# How long to let a car charge-limit write settle before treating a
+# disagreement as real. The car reports its limit only when it next phones
+# home; a 41-minute delay was observed on a confirmed-good write.
+CAR_LIMIT_GRACE = timedelta(minutes=45)
+
 
 class EVSmartChargerCoordinator(DataUpdateCoordinator):
     """Class to manage fetching data from the API and calculating charging logic."""
@@ -144,6 +149,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         # from reality: a car limit we believe we set but the car did not
         # take, and an amp reading we substitute when the car stops drawing.
         self._car_limit_drift_logged = False
+        self._car_limit_write_time = None
         self._amps_fallback_since = None
         self._amps_fallback_logged = False
 
@@ -1089,6 +1095,18 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         """
         entity_id = self.conf_keys.get("car_limit")
         if not entity_id or self._last_applied_car_limit <= 0:
+            # Nothing applied, or it was reset when charging paused. Forget
+            # any earlier mismatch, otherwise the stale flag suppresses the
+            # next real one (this check only logs on transitions).
+            self._car_limit_drift_logged = False
+            return
+
+        # The car only reports its limit when it next phones home. Measured
+        # at ~41 minutes in practice, so a fresh disagreement means nothing
+        # — it is the ones that persist past that which matter.
+        if self._car_limit_write_time is None:
+            return
+        if datetime.now() - self._car_limit_write_time < CAR_LIMIT_GRACE:
             return
         state_obj = self.hass.states.get(entity_id)
         if state_obj is None or state_obj.state in [STATE_UNAVAILABLE, STATE_UNKNOWN]:
@@ -1104,10 +1122,12 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         self._car_limit_drift_logged = drifted
         if drifted:
             _LOGGER.error(
-                "Car charge limit mismatch: we applied %s%% but %s reports "
-                "%s%%. The virtual SoC clamp uses the applied value, so the "
-                "estimate may run above the car's real limit.",
-                self._last_applied_car_limit, entity_id, actual,
+                "Car charge limit mismatch: we applied %s%% %s ago but %s "
+                "still reports %s%%. The virtual SoC clamp uses the applied "
+                "value, so the estimate may run above the car's real limit.",
+                self._last_applied_car_limit,
+                datetime.now() - self._car_limit_write_time,
+                entity_id, actual,
             )
         else:
             _LOGGER.info(
@@ -1289,6 +1309,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                         blocking=True,
                     )
                     self._last_applied_car_limit = target_soc
+                    self._car_limit_write_time = datetime.now()
                     self._add_log(f"Set Car Limit: {target_soc}%")
                 except Exception:
                     # Non-blocking: the charge plan is still valid without the
