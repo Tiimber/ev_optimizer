@@ -26,6 +26,9 @@ I also have a Local Calendar integration, where I in advance have set my specifi
 * **Manual Overrides:** Easily override the next charging session's target percentage or departure time without affecting your standard daily schedule.
 * **Maintenance Mode:** Keeps the charger active (if price allows) after reaching the target to support battery balancing or climate control.
 * **Overload Prevention with Automatic Compensation:** If your house fuse is fully loaded and the charger cannot be allocated 6A minimum, charging pauses to protect your home. The system automatically tracks these prevented minutes and extends your charging plan with extra time during the cheapest available hours to ensure you still reach your target.
+* **Measured, Not Assumed:** Where you provide an energy or power sensor for the charger, state-of-charge estimation, session totals and efficiency learning all run on what actually flowed rather than on what was commanded. Every such sensor is optional and the system degrades gracefully without them.
+* **Plans Sized on Real Performance:** Charging plans are sized from the power this setup actually delivers, which accounts both for your car's onboard charger limit and for the time load balancing spends throttling the charger.
+* **Battery-Friendly Scheduling (Optional):** Finish charging close to departure instead of hours before it, at no extra cost.
 
 ## Prerequisites
 
@@ -63,11 +66,16 @@ During setup, you will map your existing Home Assistant entities:
 * **Car Limit (Optional):** Entity to set the limit on the car itself (e.g. `number.kona_charge_limit`).
 * **Grid Sensors:** Current (Amps) for L1, L2, and L3 from your P1ib meter.
 * **Charger Current:** Current (Amps) for L1/L2/L3 *of the charger itself*. If provided, the logic becomes `Available = Main Fuse - (Grid Total - Charger Load)`. This prevents oscillation loops.
+* **Charger Power (Optional):** A sensor reporting what the charger is delivering right now (W or kW).
+* **Charger Energy Meter (Optional, recommended):** A cumulative kWh sensor for the charger. This is the single most useful optional sensor you can provide — see [Measuring Delivered Energy](#measuring-delivered-energy).
 * **Price Sensor:** Electricity/Nordpool sensor (Optional).
 * **Zaptec Controls:**
     * **Switch (Recommended):** The main switch entity for the charger (e.g., `switch.zaptec_charging`).
     * **Limiter:** The entity to set the current limit (Amps).
 * **Settings:** Main Fuse Size (A), Charger Efficiency Loss (%), and Currency.
+* **Scheduling Preferences (Optional, both default off):**
+    * **Finish charging close to departure:** When several price slots cost the same, use the later ones. Costs nothing and reduces the hours the pack spends sitting at a high state of charge.
+    * **Charge in one unbroken block:** Charge in a single stretch rather than the cheapest scattered slots. Usually costs more; starts and stops the charger only once.
 * **Calendar (Optional):** A Local Calendar entity to read for trip planning, or advanced recurring travel.
 
 ## Advanced Configuration Parameters
@@ -123,63 +131,85 @@ After your car reaches the target SoC, the system can keep the charger active at
 
 You can disable maintenance mode entirely by setting your target SoC lower, or let it run passively while you're at home.
 
-## Adaptive Efficiency Learning (NEW in v1.1.0)
+## Adaptive Efficiency Learning
 
-The system can automatically learn your charger's actual efficiency loss over time, providing more accurate charging plans and cost estimates:
+The system learns your charger's real efficiency loss over time, so charging
+plans allocate the right amount of time and cost estimates match the bill.
 
 ### How It Works
 
-* **Automatic Learning:** When enabled (`car_refresh_interval` set to "Target + 30min" or similar), the system measures actual SoC gains during charging sessions
-* **Multi-Point Sampling:** During the first 10 sessions, the system refreshes your car's SoC at multiple intervals (60 minutes, 30 minutes, and completion) to gather accurate data
-* **Smart Adjustment:** The system compares expected SoC (based on energy delivered) with actual SoC from your car, then adjusts the efficiency loss percentage:
-  * **Aggressive early adjustments** (0.5-3%) during first 5 sessions to converge quickly
-  * **Conservative fine-tuning** (0.25-1.5%) after 5 sessions for stability
-* **Confidence-Based Locking:** After 8+ measurements within tolerance (starting at ±3%, tightening to ±1%), the learned value locks and the system switches to single-refresh mode for efficiency
-* **Safety Buffer:** During learning (first 10 sessions), a 30-minute buffer is automatically added to charging plans to prevent undershooting your target
+Each measurement runs **between two state-of-charge values the car actually
+reported**. Over that window the system knows what it predicted and what the car
+says really happened, and the difference gives the true loss directly:
+
+```
+loss_true = 100 x (1 - (measured_gain / predicted_gain) x (1 - loss_used/100))
+```
+
+That single-shot estimate is noisy, so it is blended into the running value with
+a step that shrinks as confidence grows.
+
+* **Why two reported values:** cars report only when they next phone home — 41
+  minutes was measured on this author's car — so comparing a live estimate
+  against a reading of unknown age measures the reporting delay rather than the
+  charger. Anchoring both ends of the window to real readings cancels that delay
+  out, whatever it happens to be.
+* **Windows that teach nothing are discarded:** anything containing unmeasured
+  charge (the commanded-current fallback), a state of charge clamped at the car's
+  limit, or less than 3 % of predicted gain, where the car's whole-percent
+  reporting dominates the signal.
+* **Confidence-based locking:** confidence rises while measurements agree with
+  the running value, within a margin that tightens from ±3 % to ±1 %. At 8/10 the
+  value locks.
+* **Safety buffer:** during the first 10 sessions a 30-minute buffer is added to
+  charging plans so an unconverged estimate cannot undershoot your target.
 
 ### Configuration
 
 To enable adaptive learning:
 1. Go to **Settings > Devices & Services > EV Optimizer > Configure**
-2. Navigate to the **Planning Configuration** step
-3. Set **Car Refresh Interval** to one of:
-   * "Target + 30min" (recommended)
-   * "At Target SoC + 1 hour"
-   * "At Target SoC + 2 hours"
-4. The system will automatically start learning on your next charging session
+2. Navigate to the **Car Configuration** step
+3. Set **Car Refresh Interval** to "When target reached (Smart)"
+4. The system starts learning on your next charging session
+
+Forced refreshes exist to *produce* readings to anchor measurements against;
+the measurement itself happens whenever a new reading lands.
 
 ### Monitoring Learning Progress
 
-Two new sensors help you track the learning process:
+* **Learned Charger Efficiency** (`sensor.learned_charger_efficiency`): the current learned loss percentage.
+  * **Attributes:** `confidence` (0-10), `locked`, `sessions_completed`, `measurements_taken`, `status`, `last_3_measurements` (each showing predicted gain, measured gain, the loss in use at the time, and the loss it implied).
+* **Efficiency Learning Confidence** (`sensor.efficiency_learning_confidence`): confidence as an "x/10" rating.
 
-* **Learned Charger Efficiency** (`sensor.learned_charger_efficiency`): Shows current learned loss percentage (0-20%)
-  * **Attributes:**
-    * `confidence`: Current confidence level (0-10)
-    * `locked`: Whether learning is complete and locked
-    * `sessions_completed`: Number of learning sessions completed
-    * `status`: Human-readable status text
-    * `last_3_measurements`: Recent measurement history
-* **Efficiency Learning Confidence** (`sensor.efficiency_learning_confidence`): Shows confidence as "x/10" rating
+**Sessions and measurements are counted separately.** A session is one plug-in;
+a measurement is one usable window. A session can end without producing either,
+and a long session can produce several.
 
 ### Reset Learning
 
-If you change chargers or want to restart the learning process:
-1. Use the **Reset Efficiency Learning** button from your dashboard
-2. Or call the service `button.reset_efficiency_learning`
-3. Learning will restart from your configured charger loss percentage
+If you change chargers or want to restart:
+1. Use the **Reset Efficiency Learning** button from your dashboard, or
+2. Press `button.reset_efficiency_learning`
 
-### Benefits
-
-* **Accurate Cost Estimates:** Real-world efficiency data ensures your charging session cost predictions match reality
-* **Optimal Planning:** The system allocates exactly the right amount of charging time—no more, no less
-* **Hands-Off Operation:** After initial learning, the system maintains accuracy automatically across thousands of charging sessions
+Learning restarts from your configured charger loss percentage.
 
 ### Technical Details
 
-* **Learning Range:** Efficiency loss can be learned between 0% and 20%
-* **Convergence Time:** Most systems lock in after 7-10 charging sessions (typically 1-2 weeks of daily charging)
-* **Persistence:** Learned values are saved across Home Assistant restarts
-* **Bounds Protection:** The system never adjusts beyond safe operational limits
+* **Learning range:** -10 % to +30 %. The figure absorbs every source of model
+  error — charger loss, a mis-configured pack capacity, mains voltage away from
+  230 V — so a small negative correction is meaningful and means the estimator
+  under-predicts the car's real gain.
+* **Persistence:** learned values survive Home Assistant restarts.
+* **Model versioning:** learned values are tied to the estimator that produced
+  them. If the estimator changes in a future release, stored values are
+  discarded and learning restarts rather than carrying a number that no longer
+  measures what its name says. This happened once, at v1.1.25.
+
+> **Fixed in v1.1.25:** the estimator read the charger loss straight from the
+> original setup data while the planner used the learned value, so the loop
+> adjusted a figure that never fed the quantity it was measuring and could not
+> converge. If your learned efficiency sat at 0 % claiming high confidence, that
+> was why. Learning restarts automatically on upgrade.
 
 ## Load Balancing Details
 
@@ -187,21 +217,41 @@ The system protects your home's electrical system by calculating the maximum saf
 
 * **Safety Margin:** A 5% buffer is always maintained below your main fuse limit to account for voltage fluctuations.
 * **6A Minimum:** The charger requires at least 6A to safely operate. If less is available, charging pauses automatically (overload prevention).
-* **Phase Awareness:** If you provide charger current sensors (L1/L2/L3), the system calculates `Available = Main Fuse - (Total Grid Load - Charger Load)`. Without these sensors, it falls back to using the Zaptec limiter value to estimate current usage.
+* **Phase Awareness:** If you provide charger current sensors (L1/L2/L3), the system calculates `Available = Main Fuse - (Total Grid Load - Charger Load)`. Without these sensors it falls back to the charger's commanded limiter value, which is amps *per phase*.
 * **Real-time Adjustment:** The system listens for immediate updates from your electricity meter (P1) and recalculates available current instantly (with a 2-second debounce), providing protection against overload spikes.
+
+> **Fixed in v1.1.25:** the limiter fallback previously treated that value as a total and divided it across three phases, under-subtracting the charger's own draw. On installations without charger current sensors this made the charger's draw read as house load, producing a start/stop oscillation every update cycle. If you charge without charger current sensors and have seen the charger cycling, this was why.
 
 If charging is prevented due to insufficient current, the system automatically compensates by extending your charging schedule into cheaper price slots, ensuring you still reach your target on time.
 
 ## Virtual SoC Estimator
 
-Between actual car state readings, the system estimates your car's State of Charge based on charging activity:
+Cars report their state of charge only when they next phone home, which can be
+tens of minutes. Between those reports the system walks an estimate forward from
+the energy delivered, so decisions do not have to wait for the car.
 
-* **Charging Current & Time:** If the charger is active, the system calculates estimated energy delivered using the applied current (Amps) and duration.
-* **Efficiency Factored In:** The charger loss percentage you configured is accounted for in the calculation.
-* **Accuracy:** These estimates help the system make smarter decisions about when to start/stop charging without waiting for the next car API update (which can take minutes).
-* **Reset on Update:** When a real SoC reading is received from the car, the virtual estimate is replaced with the actual value to correct any drift.
+* **Efficiency Factored In:** The effective charger loss — learned if learning is enabled, otherwise the configured value — is applied to grid energy before it is added to the pack.
+* **Reset on Update:** When the car reports a genuinely new value, the estimate is replaced by it.
+* **Exposed as `sensor.ev_optimizer_virtual_state_of_charge`,** with the reported value, the current drift between the two, and which measurement source is in use as attributes.
 
-This allows the system to react faster to changing conditions and provides more accurate cost projections for your charging session.
+### Measuring Delivered Energy
+
+Energy delivered is established from the best source you have configured, in
+this order. Each rung is used only when the ones above it are unavailable:
+
+| Source | Needs | Notes |
+| --- | --- | --- |
+| Cumulative energy meter | `Charger Energy Meter` | Best. No voltage or phase-count assumption; reports what actually flowed. Handles Wh or kWh and copes with meter resets. |
+| Power sensor | `Charger Power` | Integrated over each update interval. |
+| Phase currents | `Charger Current L1/L2/L3` | Summed and multiplied by 230 V — correct for single-phase chargers as well as three-phase. |
+| Commanded current | nothing | Fallback. Assumes the current we asked for was delivered. |
+
+**The last rung is the one that can drift.** If the car stops accepting charge —
+it hit its own limit, or ended the session — nothing measures that, and the
+estimate keeps climbing while no energy flows. `binary_sensor.charge_estimate_drift`
+turns on when this has been happening for more than five minutes. Configuring
+any of the sources above it makes that impossible, which is why the energy meter
+is worth adding if you have one.
 
 ## Entities Explained
 
@@ -226,6 +276,16 @@ This integration creates several entities to help you control and visualize the 
 * **Price Logic** (`sensor`): Indicates if current electricity price is considered Cheap/Expensive relative to the day's average.
 * **Learned Charger Efficiency** (`sensor`): Shows the automatically learned efficiency loss percentage with confidence level and learning status.
 * **Efficiency Learning Confidence** (`sensor`): Displays learning confidence as "x/10" rating.
+* **Virtual State of Charge** (`sensor`): The state of charge every decision is actually made on, between the car's own reports.
+* **Planned Charge Power** (`sensor`): The power figure charging plans are sized on, and where it came from (measured, or derived from your fuse rating).
+* **Charging Savings** (`sensor`): What the schedule saved compared with simply charging on plug-in, with both figures costed on identical terms.
+* **Planned Departure** (`sensor`, timestamp): When the car is expected to be needed, with `source` naming whether that came from the calendar, an override, or your standard time. Useful as a trigger for preconditioning or climate automations.
+
+### Diagnostics
+
+* **Manual Override Active** (`binary_sensor`): Whether the next session's target came from you rather than from the planner. Previously this could only be inferred from summary text.
+* **Car Limit Drift** (`binary_sensor`, problem): The car's reported charge limit disagrees with the one we applied. Setting the limit is fire-and-forget, so a silent disagreement lets the estimate run above the car's real ceiling.
+* **Charge Estimate Drift** (`binary_sensor`, problem): The charger reports no output while we believe it is charging. See [Measuring Delivered Energy](#measuring-delivered-energy).
 
 ### Charging Report and Charging Plan
 

@@ -2,6 +2,28 @@
 
 This guide explains how to use the enhanced debugging features to diagnose issues with charging decisions.
 
+## Check the diagnostic entities first
+
+Three binary sensors report conditions that are otherwise invisible, and one of
+them explains most "the state of charge looks wrong" reports:
+
+* **`binary_sensor.charge_estimate_drift`** — the charger reports no output while
+  the integration believes it is charging, for more than five minutes. This
+  happens when nothing measures the charger's real output, so the estimate is
+  advancing from the current we *commanded*. Configure a **Charger Energy Meter**
+  or **Charger Power** sensor and it cannot occur.
+* **`binary_sensor.car_limit_drift`** — the car's reported charge limit disagrees
+  with the one we applied, more than 45 minutes after we applied it. Setting the
+  limit is fire-and-forget, so this is the only sign it did not take.
+* **`binary_sensor.manual_override_active`** — whether the next session's target
+  came from you or from the planner.
+
+Also useful: `sensor.ev_optimizer_planned_charge_power` reports the power figure
+plans are sized on and whether it is measured or derived from your fuse rating,
+and `sensor.ev_optimizer_virtual_state_of_charge` shows the estimate, the car's
+last reported value, the drift between them, and which measurement source is in
+use.
+
 ## Overview
 
 The integration now includes:
@@ -92,7 +114,9 @@ DEBUG STATE DUMP - Copy everything between the markers:
     "charger_loss": 10.0,
     "car_capacity": 50.0,
     "currency": "SEK",
-    "has_price_sensor": true
+    "has_price_sensor": true,
+    "contiguous_charging": false,
+    "prefer_late_slots": false
   },
   "user_settings": {
     "target_soc": 80,
