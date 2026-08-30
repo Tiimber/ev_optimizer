@@ -23,6 +23,10 @@ from .const import (
     LEARNING_SESSIONS,
     LEARNING_MEASUREMENTS,
     LEARNING_LOCKED,
+    LEARNING_CHARGE_POWER,
+    LEARNING_POWER_SAMPLES,
+    MIN_POWER_SAMPLES,
+    NOMINAL_VOLTAGE,
     DEFAULT_LOSS,
 )
 
@@ -61,6 +65,39 @@ def get_effective_charger_loss(config_settings: dict, learning_state: dict) -> t
     )
 
     return effective_loss, is_learning
+
+
+def get_charging_power_estimate(
+    config_settings: dict, learning_state: dict
+) -> tuple[float, str]:
+    """How much power to assume a charging slot will deliver.
+
+    Returns (kW, source) so callers can say which rung of the chain answered.
+
+    The fallback is the original behaviour — derived from the house fuse — so an
+    installation with no charger current or power sensors plans exactly as it
+    did before. Where those sensors exist, the observed figure is better on two
+    counts the fuse cannot capture: the car's onboard charger is usually the
+    real ceiling, and load balancing throttles the charger whenever the house
+    draws current.
+    """
+    fuse_estimate = min(
+        (3 * NOMINAL_VOLTAGE * config_settings.get("max_fuse", 16.0)) / 1000.0, 11.0
+    )
+
+    observed = (learning_state or {}).get(LEARNING_CHARGE_POWER)
+    samples = (learning_state or {}).get(LEARNING_POWER_SAMPLES, 0)
+
+    if not observed or samples < MIN_POWER_SAMPLES:
+        return fuse_estimate, "fuse"
+
+    # Never plan on more than the fuse would physically allow, however
+    # enthusiastic the sensor. Undershooting is safe — it buys extra slots —
+    # so only the upper side is clamped.
+    if observed > fuse_estimate:
+        return fuse_estimate, "fuse (observed higher)"
+
+    return observed, f"observed over {samples} samples"
 
 
 def calculate_load_balancing(data: dict, max_fuse: float) -> float:
@@ -432,15 +469,19 @@ def generate_charging_plan(
         efficiency = 1.0 - (effective_loss / 100.0)
         kwh_to_pull = kwh_needed / efficiency
 
-        # Estimate power from max fuse (converted to kW)
-        # P = 3 * 230 * Amps / 1000
-        est_power_kw = min((3 * 230 * config_settings["max_fuse"]) / 1000.0, 11.0)
+        # What a slot will actually deliver — measured where the sensors to
+        # measure it exist, otherwise derived from the fuse as before.
+        est_power_kw, power_source = get_charging_power_estimate(
+            config_settings, learning_state
+        )
+        plan["charge_power_kw"] = round(est_power_kw, 2)
+        plan["charge_power_source"] = power_source
         hours_needed = kwh_to_pull / est_power_kw
         
         _LOGGER.debug("⚡ Energy calculation: kwh_needed=%.2f, efficiency=%.2f (%.1f%% loss), kwh_to_pull=%.2f",
                       kwh_needed, efficiency, effective_loss, kwh_to_pull)
-        _LOGGER.debug("⏱️  Timing: est_power=%.2f kW, hours_needed=%.2f, overload_prevention_min=%.1f",
-                      est_power_kw, hours_needed, overload_prevention_minutes)
+        _LOGGER.debug("⏱️  Timing: est_power=%.2f kW (%s), hours_needed=%.2f, overload_prevention_min=%.1f",
+                      est_power_kw, power_source, hours_needed, overload_prevention_minutes)
 
         # If we don't have price data all the way to departure, prefer waiting for
         # updated price data as long as we can still reach the target before departure.

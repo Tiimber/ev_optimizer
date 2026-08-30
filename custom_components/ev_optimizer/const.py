@@ -36,6 +36,16 @@ CONF_CHARGER_CURRENT_L1 = "charger_current_l1"
 CONF_CHARGER_CURRENT_L2 = "charger_current_l2"
 CONF_CHARGER_CURRENT_L3 = "charger_current_l3"
 
+# Optional: a power sensor reading what the charger actually delivers (W or kW).
+# The most direct source for how fast this setup really charges. Entirely
+# optional — without it the figure is derived from the per-phase current
+# sensors, and without those from the fuse rating.
+CONF_CHARGER_POWER_SENSOR = "charger_power_sensor"
+
+# Nominal mains voltage, used only to turn currents into power when no power
+# sensor is configured.
+NOMINAL_VOLTAGE = 230.0
+
 # Defaults
 DEFAULT_NAME = "EV Optimizer"
 DEFAULT_CAPACITY = 64.0
@@ -114,6 +124,24 @@ CURRENT_LEARNING_MODEL = 2
 # means the estimator under-predicts the car's real SoC gain.
 MIN_LEARNED_LOSS = -10.0
 MAX_LEARNED_LOSS = 30.0
+
+# Observed charging power, learned so plans are sized on what this setup really
+# delivers rather than on what the fuse would allow.
+LEARNING_CHARGE_POWER = "typical_charge_power_kw"
+LEARNING_POWER_SAMPLES = "charge_power_samples"
+
+# Samples needed before the observed power is trusted over the fuse-derived
+# estimate. At the 30 s update interval this is ~15 minutes of charging.
+MIN_POWER_SAMPLES = 30
+
+# Sanity bounds for the observed figure. Anything outside these says the sensor
+# is lying rather than that the charger is unusual, so the fallback is used.
+MIN_OBSERVED_POWER_KW = 1.0
+MAX_OBSERVED_POWER_KW = 25.0
+
+# Only sample while genuinely charging; below this the reading is a tail-off or
+# a maintenance trickle and would drag the average down.
+MIN_POWER_SAMPLE_KW = 1.0
 
 # A measurement window must contain at least this much predicted SoC gain
 # before it says anything about efficiency. Below it, sensor quantisation

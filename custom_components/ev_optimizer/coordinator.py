@@ -45,6 +45,8 @@ from .const import (
     CONF_CHARGER_CURRENT_L1,
     CONF_CHARGER_CURRENT_L2,
     CONF_CHARGER_CURRENT_L3,
+    CONF_CHARGER_POWER_SENSOR,
+    NOMINAL_VOLTAGE,
     DEFAULT_CURRENCY,
     DEFAULT_LOSS,
     DEFAULT_DEPARTURE_TIME,
@@ -70,6 +72,12 @@ from .const import (
     MIN_LEARNED_LOSS,
     MAX_LEARNED_LOSS,
     MIN_LEARNING_WINDOW_SOC,
+    LEARNING_CHARGE_POWER,
+    LEARNING_POWER_SAMPLES,
+    MIN_POWER_SAMPLES,
+    MIN_OBSERVED_POWER_KW,
+    MAX_OBSERVED_POWER_KW,
+    MIN_POWER_SAMPLE_KW,
     REFRESH_1_HOUR,
     REFRESH_2_HOURS,
     REFRESH_3_HOURS,
@@ -115,6 +123,10 @@ _LOGGER = logging.getLogger(__name__)
 # disagreement as real. The car reports its limit only when it next phones
 # home; a 41-minute delay was observed on a confirmed-good write.
 CAR_LIMIT_GRACE = timedelta(minutes=45)
+
+# How long calendar events are reused before re-fetching. The fetch is a
+# blocking service call and departure times do not move minute to minute.
+CALENDAR_CACHE_TTL = timedelta(minutes=5)
 
 
 class EVSmartChargerCoordinator(DataUpdateCoordinator):
@@ -205,6 +217,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         # Overload prevention tracking
         self._last_overload_check_time = None
 
+        # Calendar cache (see _async_get_calendar_events)
+        self._calendar_events = []
+        self._calendar_cache_time = None
+
         # Automatic image generation tracking
         self._last_plan_image_signature = None
         self._last_report_generated = False
@@ -252,6 +268,8 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             LEARNING_LAST_REFRESH: None,
             LEARNING_PRICE_ARRIVAL: [],  # Track when tomorrow's prices arrive
             LEARNING_MODEL_VERSION: CURRENT_LEARNING_MODEL,
+            LEARNING_CHARGE_POWER: None,
+            LEARNING_POWER_SAMPLES: 0,
         }
         
         # Track when we last saw tomorrow's prices
@@ -278,6 +296,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             "ch_l1": get_conf(CONF_CHARGER_CURRENT_L1),
             "ch_l2": get_conf(CONF_CHARGER_CURRENT_L2),
             "ch_l3": get_conf(CONF_CHARGER_CURRENT_L3),
+            "charger_power": get_conf(CONF_CHARGER_POWER_SENSOR),
             "refresh_svc": get_conf(CONF_CAR_REFRESH_ACTION),
             "refresh_int": get_conf(CONF_CAR_REFRESH_INTERVAL),
         }
@@ -423,6 +442,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         """
         configured_loss = self.learning_state[LEARNING_CHARGER_LOSS]
         preserved = learning_data.get(LEARNING_PRICE_ARRIVAL, [])
+        # Observed charge power is a direct measurement of the hardware, not a
+        # value fitted by the loss estimator, so it carries across unchanged.
+        preserved_power = learning_data.get(LEARNING_CHARGE_POWER)
+        preserved_samples = learning_data.get(LEARNING_POWER_SAMPLES, 0)
 
         _LOGGER.warning(
             "Efficiency learning state was fitted by model v%d (current v%d) and "
@@ -446,6 +469,8 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             LEARNING_LAST_REFRESH: None,
             LEARNING_PRICE_ARRIVAL: preserved,
             LEARNING_MODEL_VERSION: CURRENT_LEARNING_MODEL,
+            LEARNING_CHARGE_POWER: preserved_power,
+            LEARNING_POWER_SAMPLES: preserved_samples,
         })
         self._add_log(
             "Efficiency learning reset: stored values came from an older "
@@ -663,179 +688,92 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             data = self._fetch_sensor_data()
             data.update(self.user_settings)
 
-            # Track when tomorrow's prices become available
-            self._track_price_arrival(data.get("price_data", {}))
+            # Bookkeeping that nothing downstream depends on.
+            try:
+                self._track_price_arrival(data.get("price_data", {}))
+                self._check_car_limit_drift()
+            except Exception:
+                _LOGGER.exception("Price/limit bookkeeping failed; continuing")
 
-            cal_entity = self.conf_keys.get("calendar")
-            data["calendar_events"] = []
-            if cal_entity:
-                try:
-                    now = datetime.now()
-                    resp = await self.hass.services.async_call(
-                        "calendar",
-                        "get_events",
-                        {
-                            "entity_id": cal_entity,
-                            "start_date_time": now.isoformat(),
-                            "end_date_time": (now + timedelta(hours=48)).isoformat(),
-                        },
-                        blocking=True,
-                        return_response=True,
-                    )
-                    if resp and cal_entity in resp:
-                        data["calendar_events"] = resp[cal_entity].get("events", [])
-                except Exception as e:
-                    _LOGGER.warning(f"Failed to fetch calendar events: {e}")
+            data["calendar_events"] = await self._async_get_calendar_events()
 
             await self._handle_plugged_event(data["car_plugged"], data)
             # Save last_sensor_soc BEFORE _update_virtual_soc modifies it, so we can detect
             # real sensor changes after the fact (the function updates _last_sensor_soc internally).
             _prev_sensor_soc = self._last_sensor_soc
-            self._check_car_limit_drift()
             trust_sensor_period = self._update_virtual_soc(data)
             data["car_soc"] = self._virtual_soc
             data["virtual_soc"] = self._virtual_soc
             data["reported_soc"] = self._last_sensor_soc
             data["soc_sensor_refresh"] = trust_sensor_period
 
-            # Delegate Logic to Planner
-            data["max_available_current"] = calculate_load_balancing(
-                data, self.config_settings["max_fuse"]
-            )
+            self._observe_charge_power(data)
+
+            # Load balancing is the safety loop. If it cannot be computed we
+            # must not guess high — an unknown house load with the charger left
+            # at full current is how the main fuse trips.
+            try:
+                data["max_available_current"] = calculate_load_balancing(
+                    data, self.config_settings["max_fuse"]
+                )
+            except Exception:
+                _LOGGER.exception(
+                    "Load balancing failed; treating available current as 0 A "
+                    "so the charger backs off rather than holding its last value"
+                )
+                data["max_available_current"] = 0.0
+
             data["current_price_status"] = analyze_prices(
                 data["price_data"].get("today", [])
             )
 
-            # Get expected price arrival time from learning
-            expected_price_time = self._get_expected_price_arrival_time()
-
-            # Check if sensor SoC has actually updated (unlock plan if it has).
-            # Compare the sensor value BEFORE _update_virtual_soc ran (_prev_sensor_soc)
-            # against the sensor value AFTER (_last_sensor_soc). Both are set by
-            # _update_virtual_soc, so comparing them correctly detects a real sensor change.
-            # (The old approach compared data["car_soc"] == _virtual_soc against _last_sensor_soc,
-            # both of which were already updated to the same value, so the diff was always 0.)
-            sensor_soc_updated = False
-            if _prev_sensor_soc is not None and self._last_sensor_soc is not None:
-                if abs(self._last_sensor_soc - _prev_sensor_soc) > 0.5:  # >0.5% change
-                    sensor_soc_updated = True
-                    _LOGGER.info(
-                        "🔓 SoC sensor updated (%.1f%% → %.1f%%), unlocking plan",
-                        _prev_sensor_soc, self._last_sensor_soc
-                    )
-                    self._locked_plan = None
-                    self._locked_plan_soc = None
-
-            # Use locked plan if available and sensor hasn't updated
-            if self._locked_plan is not None and not sensor_soc_updated:
-                # Unlock if the locked plan is waiting for prices (should regenerate)
-                locked_is_waiting = "Waiting for additional price data" in self._locked_plan.get("charging_summary", "")
-                if locked_is_waiting:
-                    _LOGGER.info("🔓 Locked plan is waiting for prices - unlocking to regenerate")
-                    self._locked_plan = None
-                    self._locked_plan_soc = None
-
-            # Safety: if locked plan says "Target reached" but virtual_soc is significantly
-            # below the target, the SoC sensor must have corrected downward (BMS recalibration
-            # or a stale sensor). Clear the lock so a proper charge plan is generated.
-            if self._locked_plan is not None:
-                locked_target = float(self._locked_plan.get("planned_target_soc", 0))
-                locked_summary = self._locked_plan.get("charging_summary", "")
-                if "Target reached" in locked_summary and self._virtual_soc < locked_target - 5:
-                    _LOGGER.warning(
-                        "⚠️ Locked plan says 'Target reached' but virtual_soc %.1f%% is "
-                        "%.1f%% below target %.1f%% — clearing stale maintenance lock",
-                        self._virtual_soc, locked_target - self._virtual_soc, locked_target,
-                    )
-                    self._locked_plan = None
-                    self._locked_plan_soc = None
-                    sensor_soc_updated = True
-
-            if self._locked_plan is not None and not sensor_soc_updated:
-                _LOGGER.debug(
-                    "🔒 Using locked plan (locked at %.1f%% SoC, current virtual: %.1f%%)",
-                    self._locked_plan_soc, self._virtual_soc
+            # Planning must not be able to take the control path down with it.
+            # An exception here used to abort the whole update, which skipped
+            # _apply_charger_control entirely — leaving the charger holding its
+            # last commanded current while load balancing stopped responding to
+            # house load. Degrading to a stale-but-time-limited plan keeps the
+            # safety loop alive.
+            degraded_reason = None
+            try:
+                plan = await self._resolve_plan(data, _prev_sensor_soc)
+            except Exception as err:
+                degraded_reason = f"planning failed: {err}"
+                _LOGGER.exception(
+                    "Charging plan generation failed; falling back to the last "
+                    "known plan so load balancing keeps running"
                 )
-                plan = self._locked_plan.copy()
-                # Update should_charge_now based on current time and schedule
-                plan = self._update_locked_plan_status(plan)
-                plan_is_locked = True
-            else:
-                # Generate new plan
-                plan = generate_charging_plan(
-                    data, self.config_settings, self.manual_override_active, 
-                    learning_state=self.learning_state, 
-                    overload_prevention_minutes=self.session_manager.overload_prevention_minutes,
-                    expected_price_time=expected_price_time
-                )
-                plan_is_locked = False
-                
-                # Lock the plan when charging starts for the first time
-                # BUT: Don't lock "waiting for prices" plans - they need to be regenerated when prices arrive
-                is_waiting_for_prices = "Waiting for additional price data" in plan.get("charging_summary", "")
-                if plan["should_charge_now"] and self._locked_plan is None and not is_waiting_for_prices:
-                    self._locked_plan = plan.copy()
-                    self._locked_plan_soc = self._virtual_soc
-                    _LOGGER.info(
-                        "🔒 Locking charging plan at %.1f%% SoC (plan will remain stable until SoC updates)",
-                        self._locked_plan_soc
-                    )
-                
-                # Auto-generate plan image when car is plugged and plan is ready
-                if data.get("car_plugged", False):
-                    await self._auto_generate_plan_image_if_needed(plan, is_locked=False)
+                plan = self._degraded_plan()
 
-            # Handle Buffer Logic (stateful, so stays in coordinator)
-            # Update scheduled end when we're waiting to charge
-            if not plan["should_charge_now"] and plan.get("session_end_time"):
-                self._last_scheduled_end = datetime.fromisoformat(
-                    plan["session_end_time"]
-                )
-            
-            # Clear scheduled end when charging starts (otherwise it blocks future charges)
-            if plan["should_charge_now"] and self._last_scheduled_end:
-                _LOGGER.debug(
-                    "📍 Clearing scheduled_end %s because charging is now active",
-                    self._last_scheduled_end.strftime("%H:%M:%S")
-                )
-                self._last_scheduled_end = None
-
-            # Buffer logic: keep charging for 15min after scheduled end
-            if not plan["should_charge_now"] and self._last_scheduled_end:
-                now_dt = datetime.now()
-                buffer_end = self._last_scheduled_end + timedelta(minutes=15)
-                if self._last_scheduled_end <= now_dt < buffer_end:
-                    _LOGGER.warning(
-                        "🚨 Buffer Logic Override: Forcing charge because current time %s is "
-                        "within 15min buffer after last_scheduled_end %s",
-                        now_dt.strftime("%H:%M:%S"),
-                        self._last_scheduled_end.strftime("%H:%M:%S")
-                    )
-                    plan["should_charge_now"] = True
-                    plan["charging_summary"] = "Charging Buffer Active."
-                elif now_dt >= buffer_end:
-                    # Clear old scheduled end if we're past the buffer
-                    _LOGGER.debug(
-                        "📍 Clearing old scheduled_end %s (now %s, buffer expired)",
-                        self._last_scheduled_end.strftime("%H:%M:%S"),
-                        now_dt.strftime("%H:%M:%S")
-                    )
-                    self._last_scheduled_end = None
-
+            data["update_degraded"] = degraded_reason
             data.update(plan)
 
-            await self._manage_car_refresh(data, plan)
+            # From here on every step is best-effort. None of them may stop the
+            # charger from being commanded — that is the one thing this update
+            # exists to do.
+            try:
+                await self._manage_car_refresh(data, plan)
+            except Exception:
+                _LOGGER.exception("Car refresh handling failed; continuing")
+
             await self._apply_charger_control(data, plan)
-            self._record_session_data(data)
+
+            try:
+                self._record_session_data(data)
+            except Exception:
+                _LOGGER.exception("Recording session data failed; continuing")
+
             data["action_log"] = self.session_manager.action_log
             data["last_session_data"] = self.session_manager.last_session_data
-            
+
             # Capture snapshot for debugging (async, non-blocking)
-            await self.snapshot_manager.capture_snapshot(
-                coordinator_data=data,
-                plan=plan,
-                actions_taken=self._actions_this_update.copy() if self._actions_this_update else None
-            )
+            try:
+                await self.snapshot_manager.capture_snapshot(
+                    coordinator_data=data,
+                    plan=plan,
+                    actions_taken=self._actions_this_update.copy() if self._actions_this_update else None
+                )
+            except Exception:
+                _LOGGER.exception("Snapshot capture failed; continuing")
             self._actions_this_update = []  # Reset for next update
 
             # Performance Logging
@@ -848,6 +786,230 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.error(f"Error in EV Coordinator: {err}")
             raise UpdateFailed(f"Error communicating with API: {err}")
+
+    async def _async_get_calendar_events(self) -> list:
+        """Fetch upcoming calendar events, cached.
+
+        This is a blocking service call that may go out over the network, and it
+        used to run inside every single coordinator update — up to once every
+        10 s once the P1 listener starts requesting refreshes, against a 30 s
+        base interval. Departure times do not move on that timescale.
+
+        A failed fetch returns the previous events rather than an empty list. An
+        empty list is not a neutral value here: downstream it reads as "no
+        calendar entry", which moves departure back to the manual time and
+        rewrites the plan. Holding the last known answer through a transient
+        outage is the safer default.
+        """
+        cal_entity = self.conf_keys.get("calendar")
+        if not cal_entity:
+            # No calendar configured at all — a normal setup, not a failure.
+            return []
+
+        now = datetime.now()
+        if (
+            self._calendar_cache_time is not None
+            and now - self._calendar_cache_time < CALENDAR_CACHE_TTL
+        ):
+            return self._calendar_events
+
+        try:
+            resp = await self.hass.services.async_call(
+                "calendar",
+                "get_events",
+                {
+                    "entity_id": cal_entity,
+                    "start_date_time": now.isoformat(),
+                    "end_date_time": (now + timedelta(hours=48)).isoformat(),
+                },
+                blocking=True,
+                return_response=True,
+            )
+        except Exception as e:
+            _LOGGER.warning(
+                "Failed to fetch calendar events from %s (%s); keeping the "
+                "%d event(s) from the last successful fetch",
+                cal_entity, e, len(self._calendar_events),
+            )
+            return self._calendar_events
+
+        if resp and cal_entity in resp:
+            self._calendar_events = resp[cal_entity].get("events", [])
+            self._calendar_cache_time = now
+        elif resp is not None:
+            # A well-formed response that simply holds no events for this
+            # entity: the calendar really is empty for the next 48h.
+            self._calendar_events = []
+            self._calendar_cache_time = now
+        else:
+            _LOGGER.debug(
+                "Calendar %s returned no response; keeping cached events",
+                cal_entity,
+            )
+
+        return self._calendar_events
+
+    def _degraded_plan(self) -> dict:
+        """A plan to fall back on when generation failed.
+
+        Prefers the last plan that worked. That plan carries its own schedule
+        with slot end times, and _update_locked_plan_status re-evaluates
+        should_charge_now against the clock, so reusing it is self-limiting
+        rather than open-ended — it stops charging when its slots run out even
+        if planning never recovers.
+
+        With no previous plan to fall back on, the answer is not to charge.
+        """
+        previous = self.data or {}
+        if previous.get("charging_schedule"):
+            plan = {
+                "should_charge_now": previous.get("should_charge_now", False),
+                "scheduled_start": previous.get("scheduled_start"),
+                "planned_target_soc": previous.get("planned_target_soc", 80),
+                "charging_schedule": previous.get("charging_schedule", []),
+                "session_end_time": previous.get("session_end_time"),
+                "plan_departure_time": previous.get("plan_departure_time"),
+                "charging_summary": (
+                    "⚠️ Plan generation failed — continuing on the previous "
+                    "schedule. Charging will stop when it runs out."
+                ),
+            }
+            return self._update_locked_plan_status(plan)
+
+        return {
+            "should_charge_now": False,
+            "scheduled_start": None,
+            "planned_target_soc": self.user_settings.get(ENTITY_TARGET_SOC, 80),
+            "charging_schedule": [],
+            "charging_summary": (
+                "⚠️ Plan generation failed and there is no previous schedule "
+                "to fall back on. Not charging."
+            ),
+        }
+
+    async def _resolve_plan(self, data: dict, _prev_sensor_soc):
+        """Produce the charging plan for this cycle.
+
+        Either the locked plan carried forward, or a freshly generated one.
+        Extracted so the caller can contain a failure here without losing
+        the charger-control step that follows it.
+        """
+        # Get expected price arrival time from learning
+        expected_price_time = self._get_expected_price_arrival_time()
+
+        # Check if sensor SoC has actually updated (unlock plan if it has).
+        # Compare the sensor value BEFORE _update_virtual_soc ran (_prev_sensor_soc)
+        # against the sensor value AFTER (_last_sensor_soc). Both are set by
+        # _update_virtual_soc, so comparing them correctly detects a real sensor change.
+        # (The old approach compared data["car_soc"] == _virtual_soc against _last_sensor_soc,
+        # both of which were already updated to the same value, so the diff was always 0.)
+        sensor_soc_updated = False
+        if _prev_sensor_soc is not None and self._last_sensor_soc is not None:
+            if abs(self._last_sensor_soc - _prev_sensor_soc) > 0.5:  # >0.5% change
+                sensor_soc_updated = True
+                _LOGGER.info(
+                    "🔓 SoC sensor updated (%.1f%% → %.1f%%), unlocking plan",
+                    _prev_sensor_soc, self._last_sensor_soc
+                )
+                self._locked_plan = None
+                self._locked_plan_soc = None
+
+        # Use locked plan if available and sensor hasn't updated
+        if self._locked_plan is not None and not sensor_soc_updated:
+            # Unlock if the locked plan is waiting for prices (should regenerate)
+            locked_is_waiting = "Waiting for additional price data" in self._locked_plan.get("charging_summary", "")
+            if locked_is_waiting:
+                _LOGGER.info("🔓 Locked plan is waiting for prices - unlocking to regenerate")
+                self._locked_plan = None
+                self._locked_plan_soc = None
+
+        # Safety: if locked plan says "Target reached" but virtual_soc is significantly
+        # below the target, the SoC sensor must have corrected downward (BMS recalibration
+        # or a stale sensor). Clear the lock so a proper charge plan is generated.
+        if self._locked_plan is not None:
+            locked_target = float(self._locked_plan.get("planned_target_soc", 0))
+            locked_summary = self._locked_plan.get("charging_summary", "")
+            if "Target reached" in locked_summary and self._virtual_soc < locked_target - 5:
+                _LOGGER.warning(
+                    "⚠️ Locked plan says 'Target reached' but virtual_soc %.1f%% is "
+                    "%.1f%% below target %.1f%% — clearing stale maintenance lock",
+                    self._virtual_soc, locked_target - self._virtual_soc, locked_target,
+                )
+                self._locked_plan = None
+                self._locked_plan_soc = None
+                sensor_soc_updated = True
+
+        if self._locked_plan is not None and not sensor_soc_updated:
+            _LOGGER.debug(
+                "🔒 Using locked plan (locked at %.1f%% SoC, current virtual: %.1f%%)",
+                self._locked_plan_soc, self._virtual_soc
+            )
+            plan = self._locked_plan.copy()
+            # Update should_charge_now based on current time and schedule
+            plan = self._update_locked_plan_status(plan)
+            plan_is_locked = True
+        else:
+            # Generate new plan
+            plan = generate_charging_plan(
+                data, self.config_settings, self.manual_override_active, 
+                learning_state=self.learning_state, 
+                overload_prevention_minutes=self.session_manager.overload_prevention_minutes,
+                expected_price_time=expected_price_time
+            )
+            plan_is_locked = False
+            
+            # Lock the plan when charging starts for the first time
+            # BUT: Don't lock "waiting for prices" plans - they need to be regenerated when prices arrive
+            is_waiting_for_prices = "Waiting for additional price data" in plan.get("charging_summary", "")
+            if plan["should_charge_now"] and self._locked_plan is None and not is_waiting_for_prices:
+                self._locked_plan = plan.copy()
+                self._locked_plan_soc = self._virtual_soc
+                _LOGGER.info(
+                    "🔒 Locking charging plan at %.1f%% SoC (plan will remain stable until SoC updates)",
+                    self._locked_plan_soc
+                )
+            
+            # Auto-generate plan image when car is plugged and plan is ready
+            if data.get("car_plugged", False):
+                await self._auto_generate_plan_image_if_needed(plan, is_locked=False)
+
+        # Handle Buffer Logic (stateful, so stays in coordinator)
+        # Update scheduled end when we're waiting to charge
+        if not plan["should_charge_now"] and plan.get("session_end_time"):
+            self._last_scheduled_end = datetime.fromisoformat(
+                plan["session_end_time"]
+            )
+        
+        # Clear scheduled end when charging starts (otherwise it blocks future charges)
+        if plan["should_charge_now"] and self._last_scheduled_end:
+            _LOGGER.debug(
+                "📍 Clearing scheduled_end %s because charging is now active",
+                self._last_scheduled_end.strftime("%H:%M:%S")
+            )
+            self._last_scheduled_end = None
+
+        # Buffer logic: keep charging for 15min after scheduled end
+        if not plan["should_charge_now"] and self._last_scheduled_end:
+            now_dt = datetime.now()
+            buffer_end = self._last_scheduled_end + timedelta(minutes=15)
+            if self._last_scheduled_end <= now_dt < buffer_end:
+                _LOGGER.warning(
+                    "🚨 Buffer Logic Override: Forcing charge because current time %s is "
+                    "within 15min buffer after last_scheduled_end %s",
+                    now_dt.strftime("%H:%M:%S"),
+                    self._last_scheduled_end.strftime("%H:%M:%S")
+                )
+                plan["should_charge_now"] = True
+                plan["charging_summary"] = "Charging Buffer Active."
+            elif now_dt >= buffer_end:
+                # Clear old scheduled end if we're past the buffer
+                _LOGGER.debug(
+                    "📍 Clearing old scheduled_end %s (now %s, buffer expired)",
+                    self._last_scheduled_end.strftime("%H:%M:%S"),
+                    now_dt.strftime("%H:%M:%S")
+                )
+                self._last_scheduled_end = None
+        return plan
 
     async def _manage_car_refresh(self, data: dict, plan: dict):
         if not data.get("car_plugged"):
@@ -1030,6 +1192,72 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         self._anchor_time = None
         self._anchor_loss_used = None
         self._anchor_suspect = False
+
+    def _observe_charge_power(self, data: dict):
+        """Learn how much power this setup actually delivers while charging.
+
+        The planner sizes a session from the house fuse, which is optimistic in
+        two ways: the car's onboard charger is usually the lower limit, and load
+        balancing throttles the charger whenever the house draws. Neither is
+        repaid elsewhere — overload compensation only accrues while charging is
+        fully paused under the 6 A cutoff, never while it is merely throttled —
+        so a plan sized on the fuse comes up short.
+
+        Averaging what actually flowed folds both effects in at once, without
+        needing to model either.
+
+        Sources, best first, so a setup missing any of them still works:
+          1. a configured charger power sensor,
+          2. the per-phase current sensors, summed (correct for one or three
+             phases alike, unlike a fixed 3x multiplier),
+          3. nothing — the planner keeps using its fuse-derived estimate.
+        """
+        if self._last_applied_state != "charging":
+            return
+
+        observed_kw = None
+
+        power_entity = self.conf_keys.get("charger_power")
+        if power_entity:
+            state = self.hass.states.get(power_entity)
+            if state is not None and state.state not in [STATE_UNAVAILABLE, STATE_UNKNOWN]:
+                try:
+                    value = float(state.state)
+                except (TypeError, ValueError):
+                    value = None
+                if value is not None:
+                    unit = (state.attributes or {}).get("unit_of_measurement", "")
+                    observed_kw = value / 1000.0 if str(unit).upper().startswith("W") else value
+
+        if observed_kw is None:
+            phases = [data.get("ch_l1", 0.0), data.get("ch_l2", 0.0), data.get("ch_l3", 0.0)]
+            total_amps = sum(a for a in phases if a and a > 0)
+            if total_amps > 0:
+                observed_kw = (NOMINAL_VOLTAGE * total_amps) / 1000.0
+
+        if observed_kw is None or observed_kw < MIN_POWER_SAMPLE_KW:
+            return
+        if not (MIN_OBSERVED_POWER_KW <= observed_kw <= MAX_OBSERVED_POWER_KW):
+            _LOGGER.debug(
+                "Ignoring implausible charge power sample: %.2f kW", observed_kw
+            )
+            return
+
+        samples = self.learning_state.get(LEARNING_POWER_SAMPLES, 0)
+        current = self.learning_state.get(LEARNING_CHARGE_POWER)
+
+        if not current or samples == 0:
+            new_value = observed_kw
+        else:
+            # Slow EMA: this should track the setup's typical behaviour, not
+            # follow every dip while the kettle is on.
+            new_value = current + 0.05 * (observed_kw - current)
+
+        self.learning_state[LEARNING_CHARGE_POWER] = new_value
+        self.learning_state[LEARNING_POWER_SAMPLES] = samples + 1
+
+        if (samples + 1) % 60 == 0:
+            self._save_data()
 
     def _open_learning_window(self, sensor_soc: float, when: datetime):
         """Anchor a new measurement window at a real sensor reading."""

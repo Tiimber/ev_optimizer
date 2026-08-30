@@ -19,6 +19,9 @@ from .const import (
     LEARNING_MEASUREMENTS,
     LEARNING_LOCKED,
     LEARNING_HISTORY,
+    LEARNING_CHARGE_POWER,
+    LEARNING_POWER_SAMPLES,
+    MIN_POWER_SAMPLES,
 )
 from .coordinator import EVSmartChargerCoordinator
 
@@ -43,6 +46,7 @@ async def async_setup_entry(
         LearnedEfficiencySensor(coordinator), # Learning efficiency
         EfficiencyConfidenceSensor(coordinator), # Learning confidence
         EVVirtualSoCSensor(coordinator), # The SoC every decision actually runs on
+        EVChargePowerSensor(coordinator), # What plans are sized on
     ])
 
 class EVSmartChargerBaseSensor(CoordinatorEntity, SensorEntity):
@@ -339,4 +343,59 @@ class EVVirtualSoCSensor(CoordinatorEntity, SensorEntity):
             "measurement_window_since": (
                 anchor_time.isoformat() if anchor_time else None
             ),
+        }
+
+
+class EVChargePowerSensor(CoordinatorEntity, SensorEntity):
+    """The power figure charging plans are sized on.
+
+    Sizing a session from the house fuse is optimistic twice over: the car's
+    onboard charger is usually the lower limit, and load balancing throttles the
+    charger whenever the house draws. This reports what the plan actually
+    assumed, and where that number came from, so a session that comes up short
+    can be explained rather than guessed at.
+    """
+
+    _attr_has_entity_name = False
+    _attr_name = "Planned Charge Power"
+    _attr_unique_id = "ev_optimizer_charge_power"
+    _attr_native_unit_of_measurement = "kW"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_icon = "mdi:speedometer"
+    _attr_suggested_display_precision = 2
+
+    @property
+    def native_value(self) -> float | None:
+        from .planner import get_charging_power_estimate
+
+        value, _ = get_charging_power_estimate(
+            self.coordinator.config_settings, self.coordinator.learning_state
+        )
+        return round(value, 2)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        from .planner import get_charging_power_estimate
+
+        learning = self.coordinator.learning_state
+        samples = learning.get(LEARNING_POWER_SAMPLES, 0)
+        observed = learning.get(LEARNING_CHARGE_POWER)
+        _, source = get_charging_power_estimate(
+            self.coordinator.config_settings, learning
+        )
+
+        if not self.coordinator.conf_keys.get("charger_power") and not any(
+            self.coordinator.conf_keys.get(k) for k in ("ch_l1", "ch_l2", "ch_l3")
+        ):
+            observation = "unavailable - no charger power or current sensors configured"
+        elif samples < MIN_POWER_SAMPLES:
+            observation = f"warming up - {samples}/{MIN_POWER_SAMPLES} samples"
+        else:
+            observation = "measured"
+
+        return {
+            "source": source,
+            "observed_kw": round(observed, 2) if observed else None,
+            "samples": samples,
+            "observation_status": observation,
         }

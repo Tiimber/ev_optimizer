@@ -55,6 +55,7 @@
           "charger_current_l1": "Charger Current L1",
           "charger_current_l2": "Charger Current L2",
           "charger_current_l3": "Charger Current L3",
+          "charger_power_sensor": "Charger Power",
           "max_fuse": "Main Fuse Size"
         },
         "data_description": {
@@ -64,6 +65,7 @@
           "charger_current_l1": "Optional: Specific current usage of the charger (L1). Helps calculate net house load.",
           "charger_current_l2": "Optional: Specific current usage of the charger (L2).",
           "charger_current_l3": "Optional: Specific current usage of the charger (L3).",
+          "charger_power_sensor": "Optional: A sensor reporting the power the charger actually delivers. Used to size charging plans on measured performance; falls back to the current sensors above, then to the fuse rating.",
           "max_fuse": "The size of your main household fuse (Amps) to prevent tripping."
         }
       },
@@ -170,6 +172,7 @@
           "charger_current_l1": "Charger Current L1",
           "charger_current_l2": "Charger Current L2",
           "charger_current_l3": "Charger Current L3",
+          "charger_power_sensor": "Charger Power",
           "max_fuse": "Main Fuse Size"
         },
         "data_description": {
@@ -179,6 +182,7 @@
           "charger_current_l1": "Optional: Specific current usage of the charger (L1). Helps calculate net house load.",
           "charger_current_l2": "Optional: Specific current usage of the charger (L2).",
           "charger_current_l3": "Optional: Specific current usage of the charger (L3).",
+          "charger_power_sensor": "Optional: A sensor reporting the power the charger actually delivers. Used to size charging plans on measured performance; falls back to the current sensors above, then to the fuse rating.",
           "max_fuse": "The size of your main household fuse (Amps) to prevent tripping."
         }
       },

@@ -50,6 +50,7 @@ from .const import (
     CONF_CHARGER_CURRENT_L1,
     CONF_CHARGER_CURRENT_L2,
     CONF_CHARGER_CURRENT_L3,
+    CONF_CHARGER_POWER_SENSOR,
     REFRESH_NEVER,
     REFRESH_30_MIN,
     REFRESH_1_HOUR,
@@ -292,6 +293,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     default=defaults.get(CONF_CHARGER_CURRENT_L3),
                 ): EntitySelector(
                     EntitySelectorConfig(domain="sensor", device_class="current")
+                ),
+                # Optional. Without it, delivered power is derived from the
+                # per-phase current sensors above; without those either, plans
+                # fall back to the fuse rating exactly as before.
+                vol.Optional(
+                    CONF_CHARGER_POWER_SENSOR,
+                    default=defaults.get(CONF_CHARGER_POWER_SENSOR),
+                ): EntitySelector(
+                    EntitySelectorConfig(domain="sensor", device_class="power")
                 ),
                 vol.Required(
                     CONF_MAX_FUSE, default=defaults.get(CONF_MAX_FUSE, DEFAULT_MAX_FUSE)
