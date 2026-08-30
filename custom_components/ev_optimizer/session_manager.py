@@ -23,6 +23,11 @@ class SessionManager:
         self.last_session_data = None
         self.overload_prevention_minutes = 0.0
         self._was_charging_in_interval = False
+        # Energy actually delivered in the current interval, and its source.
+        # Populated by the coordinator from the best measurement available.
+        self._interval_grid_kwh = 0.0
+        self._interval_energy_source = "none"
+        self._interval_price = 0.0
         self._last_log_message = None
         self._last_log_time = None
     
@@ -98,6 +103,7 @@ class SessionManager:
             "log": [],
             "session_overload_minutes": 0.0,
         }
+        self._interval_grid_kwh = 0.0
         # Reset overload prevention counter for new session
         # This tracks time lost to overload during the current plugged-in period
         self.overload_prevention_minutes = 0.0
@@ -150,10 +156,28 @@ class SessionManager:
             "charging": is_charging,
             "price": adjusted_price,
             "soc_sensor_refresh": data.get("soc_sensor_refresh", False),
+            # Measured energy for the interval ending at this point, and where
+            # the figure came from. Absent on histories recorded before this
+            # existed, which is why the totals below still have a fallback.
+            "grid_kwh": round(self._interval_grid_kwh, 5),
+            "energy_source": self._interval_energy_source,
         }
 
         self.current_session["history"].append(point)
         self._was_charging_in_interval = False
+        self._interval_grid_kwh = 0.0
+
+    def add_grid_energy(self, kwh: float, data: dict):
+        """Record energy delivered since the last data point.
+
+        Session totals used to be re-derived from the *commanded* current, which
+        overstates them exactly as the virtual SoC used to: it counts amps we
+        asked for rather than energy that flowed. When a real measurement is
+        available it is carried here instead.
+        """
+        if kwh and kwh > 0:
+            self._interval_grid_kwh += kwh
+        self._interval_energy_source = data.get("energy_source", "none")
 
     def mark_charging_in_interval(self):
         """Mark that charging occurred during this interval (even if short)."""
@@ -195,21 +219,38 @@ class SessionManager:
              "overload_prevention_minutes": self.current_session.get("session_overload_minutes", 0.0),
             }
 
-        prev = datetime.fromisoformat(history[0]["time"])
-        for i in range(1, len(history)):
-            curr = datetime.fromisoformat(history[i]["time"])
-            delta_h = (curr - prev).total_seconds() / 3600.0
-            prev = curr
-            amps = history[i - 1]["amps"]
-            is_charging = history[i - 1]["charging"]
-            
-            if is_charging and amps > 0:
-                # Standard 3-phase calculation, maybe should be configurable (1 vs 3 phase)
-                power = (3 * 230 * amps) / 1000.0
-                kwh = power * delta_h
-                cost = kwh * history[i - 1]["price"]
+        # Prefer measured energy per interval. The fallback re-derives it from
+        # the current we *commanded*, assuming three phases at 230 V — which
+        # overstates the total whenever the car drew less than we asked for (or
+        # nothing at all), and is simply wrong for a single-phase charger.
+        measured_points = [
+            p for p in history if p.get("grid_kwh") is not None
+            and p.get("energy_source") not in (None, "none", "commanded")
+        ]
+        used_measured = bool(measured_points)
+
+        if used_measured:
+            for point in history:
+                kwh = point.get("grid_kwh") or 0.0
+                if kwh <= 0:
+                    continue
                 total_kwh += kwh
-                total_cost += cost
+                total_cost += kwh * point.get("price", 0.0)
+        else:
+            prev = datetime.fromisoformat(history[0]["time"])
+            for i in range(1, len(history)):
+                curr = datetime.fromisoformat(history[i]["time"])
+                delta_h = (curr - prev).total_seconds() / 3600.0
+                prev = curr
+                amps = history[i - 1]["amps"]
+                is_charging = history[i - 1]["charging"]
+
+                if is_charging and amps > 0:
+                    power = (3 * 230 * amps) / 1000.0
+                    kwh = power * delta_h
+                    cost = kwh * history[i - 1]["price"]
+                    total_kwh += kwh
+                    total_cost += cost
 
         return {
             "start_time": self.current_session["start_time"],
@@ -218,6 +259,7 @@ class SessionManager:
             "end_soc": end_soc,
             "added_kwh": round(total_kwh, 2),
             "total_cost": round(total_cost, 2),
+            "energy_basis": "measured" if used_measured else "commanded current",
             "currency": currency,
             "graph_data": history,
             "session_log": self.current_session["log"],

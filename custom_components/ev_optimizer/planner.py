@@ -3,7 +3,7 @@
 import logging
 import math
 import re
-from datetime import timedelta, datetime, time
+from datetime import timedelta, datetime, time, timezone
 
 from .const import (
     ENTITY_TARGET_SOC,
@@ -31,6 +31,64 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# Optional: only used to make price-slot arithmetic and calendar offsets
+# timezone-correct. The module stays importable and fully functional without
+# Home Assistant, falling back to naive local arithmetic.
+try:  # pragma: no cover - trivially environment-dependent
+    from homeassistant.util import dt as dt_util
+except ImportError:  # pragma: no cover
+    dt_util = None
+
+
+def _local_timezone():
+    """The configured local timezone, or None if we cannot determine it."""
+    if dt_util is None:
+        return None
+    return getattr(dt_util, "DEFAULT_TIME_ZONE", None)
+
+
+def slot_start_times(date_ref, count: int, interval_min: int) -> list:
+    """Wall-clock start times for a day's price slots.
+
+    Naive arithmetic — midnight plus i x interval — silently assumes every day
+    is 24 hours long. On the two days a year that are not, the price array is
+    short or long to match (Nordpool publishes 92 or 100 quarters), and the
+    naive sequence walks an hour out of step with it for the rest of the day,
+    so every slot is priced from the wrong hour.
+
+    Stepping through absolute time instead and converting back to local gets
+    this right for free: the same 92 entries land on the same 23 wall-clock
+    hours the market actually traded.
+
+    Returns naive local datetimes, because that is what the rest of this module
+    compares against. On the autumn fold two slots therefore share a wall-clock
+    label for one hour a year; that ambiguity is bounded and far smaller than
+    the misalignment it replaces.
+    """
+    midnight = datetime.combine(date_ref, time(0, 0))
+    tz = _local_timezone()
+
+    if tz is None:
+        # No timezone available (module used standalone, or HA not configured
+        # yet): behave exactly as before.
+        return [midnight + timedelta(minutes=i * interval_min) for i in range(count)]
+
+    try:
+        aware_midnight = midnight.replace(tzinfo=tz)
+        utc_midnight = aware_midnight.astimezone(timezone.utc)
+        return [
+            (utc_midnight + timedelta(minutes=i * interval_min))
+            .astimezone(tz)
+            .replace(tzinfo=None)
+            for i in range(count)
+        ]
+    except Exception:  # pragma: no cover - defensive
+        _LOGGER.warning(
+            "Could not build timezone-aware price slots; falling back to naive "
+            "arithmetic", exc_info=True,
+        )
+        return [midnight + timedelta(minutes=i * interval_min) for i in range(count)]
 
 
 def get_effective_charger_loss(config_settings: dict, learning_state: dict) -> tuple[float, bool]:
@@ -100,6 +158,81 @@ def get_charging_power_estimate(
     return observed, f"observed over {samples} samples"
 
 
+def cost_of_slots(
+    slots: list,
+    kwh_to_pull: float,
+    kwh_per_slot_max: float,
+    extra_fee: float = 0.0,
+    vat_pct: float = 0.0,
+) -> float:
+    """Cost of drawing `kwh_to_pull` through `slots`, cheapest-relevant first.
+
+    Slots are consumed in chronological order until the energy is covered, the
+    same way the real schedule fills up, so plan and baseline are costed on
+    identical terms.
+    """
+    if kwh_per_slot_max <= 0:
+        return 0.0
+
+    remaining = kwh_to_pull
+    total = 0.0
+    for slot in sorted(slots, key=lambda s: s["start"]):
+        if remaining <= 0.001:
+            break
+        kwh = min(kwh_per_slot_max, remaining)
+        remaining -= kwh
+        total += (slot["price"] + extra_fee) * (1 + vat_pct / 100.0) * kwh
+    return total
+
+
+def select_charging_slots(
+    calc_window: list,
+    slots_needed: int,
+    contiguous: bool = False,
+    prefer_late: bool = False,
+) -> list:
+    """Choose which slots to charge in.
+
+    Default (both flags off) is unchanged: the `slots_needed` cheapest slots
+    before departure, wherever in the window they fall.
+
+    `prefer_late` only changes the answer among slots that cost the *same*.
+    Quarter-hourly data splits each hourly price into four identical values, so
+    ties are the common case rather than the exception, and breaking them
+    towards the end of the window finishes the charge nearer departure without
+    paying anything for it.
+
+    `contiguous` changes the answer more substantially: it picks the cheapest
+    unbroken run of `slots_needed` slots, so the session is one stretch instead
+    of several. That generally costs more than cherry-picking, and is a
+    trade against wear rather than against price.
+    """
+    if slots_needed <= 0 or not calc_window:
+        return []
+
+    ordered = sorted(calc_window, key=lambda s: s["start"])
+
+    if contiguous:
+        if slots_needed >= len(ordered):
+            return list(ordered)
+        best_start, best_cost = 0, None
+        for i in range(len(ordered) - slots_needed + 1):
+            run = ordered[i:i + slots_needed]
+            cost = sum(s["price"] for s in run)
+            # `<` rather than `<=` keeps the earliest of equally-priced runs by
+            # default; prefer_late flips that to the latest.
+            if best_cost is None or cost < best_cost or (prefer_late and cost == best_cost):
+                best_start, best_cost = i, cost
+        return list(ordered[best_start:best_start + slots_needed])
+
+    # Cheapest-first. The secondary key breaks ties by time — later slots first
+    # when prefer_late is set, earliest otherwise (which is the original order).
+    return sorted(
+        calc_window,
+        key=lambda s: (s["price"], -s["start"].timestamp() if prefer_late else s["start"].timestamp()),
+    )[:slots_needed]
+
+
 def calculate_load_balancing(data: dict, max_fuse: float) -> float:
     """Calculate the safe current available for the charger."""
     p1_l1 = data.get("p1_l1", 0.0)
@@ -109,13 +242,19 @@ def calculate_load_balancing(data: dict, max_fuse: float) -> float:
     ch_l2 = data.get("ch_l2", 0.0)
     ch_l3 = data.get("ch_l3", 0.0)
 
-    # If charger current sensors are not configured, use Zaptec limiter value as fallback
-    # This ensures the load balancing accounts for the commanded current limit
+    # With no charger current sensors configured, fall back to the commanded
+    # limiter value so load balancing still subtracts the charger's own draw.
+    #
+    # The limiter is amps *per phase*, not a total to be divided between them.
+    # Spreading it as zap_limit/3 under-subtracted the charger by a factor of
+    # three, which inflated apparent house load by the difference and drove a
+    # stable start/stop oscillation: the charger would be allowed on, the next
+    # reading would look like an overload, it would be paused, the reading
+    # would recover, and so on every cycle — on a house with plenty to spare.
     if ch_l1 == 0.0 and ch_l2 == 0.0 and ch_l3 == 0.0:
         zap_limit = data.get("zap_limit_value", 0.0)
         if zap_limit > 0:
-            # Assume limiter current is distributed (roughly evenly) across phases
-            ch_l1 = ch_l2 = ch_l3 = zap_limit / 3.0
+            ch_l1 = ch_l2 = ch_l3 = zap_limit
 
     house_l1 = max(0.0, p1_l1 - ch_l1)
     house_l2 = max(0.0, p1_l2 - ch_l2)
@@ -211,6 +350,13 @@ def get_calendar_data(
             else:
                 evt_start = datetime.fromisoformat(start_str)
                 if evt_start.tzinfo:
+                    # Convert into local time before dropping the offset.
+                    # replace(tzinfo=None) alone *discards* it, which is only
+                    # correct while the calendar happens to emit local-offset
+                    # timestamps — a UTC one would land hours out.
+                    tz = _local_timezone()
+                    if tz is not None:
+                        evt_start = evt_start.astimezone(tz)
                     evt_start = evt_start.replace(tzinfo=None)
             if evt_start < now:
                 continue
@@ -317,16 +463,22 @@ def generate_charging_plan(
         if not price_list:
             return []
         interval_min = 60 if len(price_list) <= 25 else 15
+        starts = slot_start_times(date_ref, len(price_list), interval_min)
         for i, price in enumerate(price_list):
-            start_dt = datetime.combine(date_ref, time(0, 0)) + timedelta(
-                minutes=i * interval_min
-            )
-            if start_dt + timedelta(minutes=interval_min) < now:
+            start_dt = starts[i]
+            # The slot ends where the next one begins. Deriving it from the
+            # neighbour rather than adding the nominal interval keeps the DST
+            # hour from leaving a gap or an overlap.
+            if i + 1 < len(starts):
+                end_dt = starts[i + 1]
+            else:
+                end_dt = start_dt + timedelta(minutes=interval_min)
+            if end_dt < now:
                 continue
             parsed.append(
                 {
                     "start": start_dt,
-                    "end": start_dt + timedelta(minutes=interval_min),
+                    "end": end_dt,
                     "price": float(price),
                 }
             )
@@ -360,6 +512,20 @@ def generate_charging_plan(
     # ISO datetime, which is why the Standard Departure Time entity always read
     # back 07:00 no matter what was stored.
     plan["plan_departure_time"] = dept_dt.isoformat()
+
+    # State where the time came from as data. Consumers used to infer it by
+    # looking for "(Calendar)" inside the human-readable summary, which is only
+    # present on the detailed scheduling summary — so a maintenance-mode or
+    # early-return plan reported the wrong source.
+    _cal_time, _ = get_calendar_data(data.get("calendar_events") or [], now)
+    _override = data.get(ENTITY_DEPARTURE_OVERRIDE)
+    _standard = data.get(ENTITY_DEPARTURE_TIME)
+    if _cal_time and _cal_time == dept_dt:
+        plan["departure_source"] = "calendar"
+    elif _override and _standard and _override != _standard:
+        plan["departure_source"] = "next session override"
+    else:
+        plan["departure_source"] = "standard departure time"
     calc_window = [p for p in prices if p["start"] < dept_dt]
     
     _LOGGER.debug("🕐 Departure time: %s (from %s)",
@@ -605,8 +771,12 @@ def generate_charging_plan(
             slots_needed += buffer_slots
             _LOGGER.debug("⏰ Learning phase: adding %d slots (30min safety buffer)", buffer_slots)
         
-        sorted_window = sorted(calc_window, key=lambda x: x["price"])
-        selected_slots = sorted_window[:slots_needed]
+        selected_slots = select_charging_slots(
+            calc_window,
+            slots_needed,
+            contiguous=config_settings.get("contiguous_charging", False),
+            prefer_late=config_settings.get("prefer_late_slots", False),
+        )
         selected_start_times = {s["start"] for s in selected_slots}
         
         if selected_slots:
@@ -693,6 +863,20 @@ def generate_charging_plan(
             if current_block:
                 blocks.append(current_block)
 
+            # What the same charge would have cost starting right now, taking
+            # slots as they come. The difference is what the scheduling bought.
+            baseline_cost = cost_of_slots(
+                [s for s in calc_window if s["end"] > now],
+                kwh_to_pull,
+                kwh_grid_per_slot_max,
+                extra_fee,
+                vat_pct,
+            )
+            plan["planned_cost"] = round(total_plan_cost, 2)
+            plan["baseline_cost"] = round(baseline_cost, 2)
+            plan["estimated_savings"] = round(baseline_cost - total_plan_cost, 2)
+            plan["currency"] = currency
+
             summary_lines.append(
                 f"**Departure:** {dept_dt.strftime('%H:%M')} {time_source}"
             )
@@ -700,6 +884,10 @@ def generate_charging_plan(
             summary_lines.append(
                 f"**Total Estimated Cost:** {total_plan_cost:.2f} {currency} {cost_note}"
             )
+            if plan.get("estimated_savings", 0) > 0.01:
+                summary_lines.append(
+                    f"**Saved vs charging now:** {plan['estimated_savings']:.2f} {currency}"
+                )
             summary_lines.append("")
             for b in blocks:
                 start_s = b["soc_start"]

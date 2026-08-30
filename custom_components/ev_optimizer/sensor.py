@@ -11,6 +11,11 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 
+try:  # Only needed to make the departure timestamp timezone-aware.
+    from homeassistant.util import dt as dt_util
+except ImportError:  # pragma: no cover
+    dt_util = None
+
 from .const import (
     DOMAIN,
     LEARNING_CHARGER_LOSS,
@@ -47,6 +52,8 @@ async def async_setup_entry(
         EfficiencyConfidenceSensor(coordinator), # Learning confidence
         EVVirtualSoCSensor(coordinator), # The SoC every decision actually runs on
         EVChargePowerSensor(coordinator), # What plans are sized on
+        EVSavingsSensor(coordinator), # What the scheduling bought
+        EVPlannedDepartureSensor(coordinator), # Hook for preconditioning etc.
     ])
 
 class EVSmartChargerBaseSensor(CoordinatorEntity, SensorEntity):
@@ -186,28 +193,24 @@ class EVDebugDumpPathSensor(EVSmartChargerBaseSensor):
 
     @property
     def extra_state_attributes(self):
-        """Return additional info."""
-        import os
-        file_path = self.coordinator.hass.config.path("www", "ev_optimizer_debug_dump.json")
-        file_exists = os.path.exists(file_path)
-        
-        attrs = {
-            "file_path": file_path,
-            "file_exists": file_exists,
+        """Return additional info.
+
+        Reported from what the coordinator recorded when it last wrote a dump.
+        This used to stat the filesystem, which is blocking I/O on the event
+        loop and ran every time the state was written — i.e. every update — to
+        answer a question that only changes when the button is pressed.
+        """
+        coordinator = self.coordinator
+        written = coordinator._last_debug_dump_time
+
+        return {
+            "file_path": coordinator._last_debug_dump_path
+            or coordinator.hass.config.path("www", "ev_optimizer_debug_dump.json"),
+            "written_this_session": written is not None,
             "download_url": "/local/ev_optimizer_debug_dump.json",
+            "file_size_bytes": coordinator._last_debug_dump_size,
+            "last_written": written.isoformat() if written else None,
         }
-        
-        if file_exists:
-            try:
-                stat = os.stat(file_path)
-                attrs["file_size_bytes"] = stat.st_size
-                attrs["last_modified"] = datetime.fromtimestamp(stat.st_mtime).isoformat()
-            except OSError:
-                _LOGGER.error(
-                    "Could not stat debug dump %s", file_path, exc_info=True
-                )
-        
-        return attrs
 
 
 class LearnedEfficiencySensor(CoordinatorEntity, SensorEntity):
@@ -339,6 +342,7 @@ class EVVirtualSoCSensor(CoordinatorEntity, SensorEntity):
                 else None
             ),
             "charger_state": coordinator._last_applied_state,
+            "energy_source": coordinator.energy_source,
             "measurement_window_open": coordinator._anchor_sensor_soc is not None,
             "measurement_window_since": (
                 anchor_time.isoformat() if anchor_time else None
@@ -398,4 +402,90 @@ class EVChargePowerSensor(CoordinatorEntity, SensorEntity):
             "observed_kw": round(observed, 2) if observed else None,
             "samples": samples,
             "observation_status": observation,
+        }
+
+
+class EVSavingsSensor(CoordinatorEntity, SensorEntity):
+    """What scheduling saved against simply charging on plug-in.
+
+    The plan's cost was already computed; this puts a number on the alternative
+    so the value of waiting is visible rather than assumed.
+    """
+
+    _attr_has_entity_name = False
+    _attr_name = "Charging Savings"
+    _attr_unique_id = "ev_optimizer_savings"
+    _attr_icon = "mdi:piggy-bank"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 2
+
+    @property
+    def native_unit_of_measurement(self):
+        return self.coordinator.currency
+
+    @property
+    def native_value(self) -> float | None:
+        data = self.coordinator.data or {}
+        savings = data.get("estimated_savings")
+        return round(savings, 2) if savings is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        data = self.coordinator.data or {}
+        planned = data.get("planned_cost")
+        baseline = data.get("baseline_cost")
+
+        share = None
+        if planned is not None and baseline:
+            share = round((1 - planned / baseline) * 100.0, 1)
+
+        return {
+            "planned_cost": planned,
+            "cost_if_charging_now": baseline,
+            "saved_percent": share,
+            "currency": self.coordinator.currency,
+        }
+
+
+class EVPlannedDepartureSensor(CoordinatorEntity, SensorEntity):
+    """When the car is expected to be needed.
+
+    Exposed as a timestamp so automations can key off it — preconditioning,
+    climate, notifications — without having to re-derive the calendar and
+    override logic that produced it.
+    """
+
+    _attr_has_entity_name = False
+    _attr_name = "Planned Departure"
+    _attr_unique_id = "ev_optimizer_planned_departure"
+    _attr_icon = "mdi:clock-out"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    @property
+    def native_value(self):
+        raw = (self.coordinator.data or {}).get("plan_departure_time")
+        if not raw:
+            return None
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except (TypeError, ValueError):
+            return None
+        # HA requires an aware datetime for a timestamp sensor; the planner
+        # works in naive local time.
+        if parsed.tzinfo is None:
+            tz = getattr(dt_util, "DEFAULT_TIME_ZONE", None) if dt_util else None
+            if tz is None:
+                return None
+            parsed = parsed.replace(tzinfo=tz)
+        return parsed
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        data = self.coordinator.data or {}
+
+        return {
+            "source": data.get("departure_source", "unknown"),
+            "target_soc": data.get("planned_target_soc"),
+            "scheduled_start": data.get("scheduled_start"),
+            "session_end_time": data.get("session_end_time"),
         }

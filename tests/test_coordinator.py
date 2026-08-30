@@ -316,6 +316,9 @@ def test_virtual_soc_accepts_sensor_during_forced_refresh(pkg_loader, hass_mock)
     coord._last_applied_amps = 16.0
     coord._last_update_time = datetime.now() - timedelta(seconds=30)
     coord._soc_before_refresh = 65.0
+    # The sensor said 65.0 when the refresh went out; it now says 68.5, so the
+    # refresh genuinely produced a new reading.
+    coord._sensor_soc_at_refresh = 65.0
     coord._refresh_trigger_timestamp = datetime.now() - timedelta(minutes=1)
     coord.car_capacity = 75.0
     

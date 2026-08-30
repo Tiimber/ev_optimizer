@@ -101,6 +101,8 @@ def test_maintenance_mode_accepts_sensor_after_forced_refresh(pkg_loader, hass_m
     coord._last_applied_state = "maintenance"
     coord._last_sensor_soc = 75.0
     coord._soc_before_refresh = 80.0
+    # Sensor read 75.0 at refresh time and now reads 78.0: a real update.
+    coord._sensor_soc_at_refresh = 75.0
     
     # Trigger forced refresh (within 5 minute window)
     coord._refresh_trigger_timestamp = datetime.now() - timedelta(seconds=30)

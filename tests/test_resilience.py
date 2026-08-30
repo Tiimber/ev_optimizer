@@ -342,3 +342,59 @@ def test_calendar_failure_keeps_the_last_known_events(pkg_loader, hass_mock):
 
     assert good == [{"summary": "Trip 80%"}]
     assert after_failure == good
+
+
+# --- load balancing without charger current sensors --------------------------
+
+
+def test_limiter_fallback_treats_the_limit_as_per_phase(pkg_loader):
+    """The Zaptec limiter is amps per phase, not a total to split between them."""
+    planner = pkg_loader("planner")
+
+    # House draws 4 A/phase; the charger is commanded to 15 A and is drawing it,
+    # so P1 reads 19 A/phase. With no ch_l* sensors the limiter is the only clue
+    # to how much of that is the charger.
+    data = {
+        "p1_l1": 19.0, "p1_l2": 19.0, "p1_l3": 19.0,
+        "ch_l1": 0.0, "ch_l2": 0.0, "ch_l3": 0.0,
+        "zap_limit_value": 15.0,
+    }
+    available = planner.calculate_load_balancing(data, max_fuse=20.0)
+
+    # 20 - 4 (real house) - 1 (buffer) = 15 A
+    assert available == pytest.approx(15.0)
+
+
+def test_limiter_fallback_does_not_oscillate(pkg_loader):
+    """Regression: under-subtracting the charger drove a start/stop loop.
+
+    Treating the per-phase limiter as a total made the charger's own draw look
+    like house load, so every cycle in which charging was allowed produced a
+    reading that forbade it, and vice versa — indefinitely, on a house with
+    plenty of headroom.
+    """
+    import math
+
+    planner = pkg_loader("planner")
+
+    max_fuse, house = 20.0, 4.0
+    commanded = 0.0
+    decisions = []
+
+    for _ in range(8):
+        p1 = house + commanded
+        available = planner.calculate_load_balancing(
+            {
+                "p1_l1": p1, "p1_l2": p1, "p1_l3": p1,
+                "ch_l1": 0.0, "ch_l2": 0.0, "ch_l3": 0.0,
+                "zap_limit_value": commanded,
+            },
+            max_fuse,
+        )
+        amps = math.floor(available)
+        charging = amps >= 6
+        decisions.append(charging)
+        commanded = float(amps) if charging else 0.0
+
+    assert all(decisions), f"charging should stay on, got {decisions}"
+    assert commanded == pytest.approx(15.0)

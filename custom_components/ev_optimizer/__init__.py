@@ -56,7 +56,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register services
     async def handle_dump_debug_state(call):
         """Handle the dump_debug_state service call."""
-        coordinator.dump_debug_state()
+        await coordinator.async_dump_debug_state()
     
     async def handle_capture_snapshot(call):
         """Handle the capture_snapshot service call."""

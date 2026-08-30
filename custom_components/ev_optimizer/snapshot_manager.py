@@ -316,30 +316,37 @@ class SnapshotManager:
         
         # Create www directory if needed
         www_path = Path(self.hass.config.path("www"))
-        www_path.mkdir(exist_ok=True)
         
         timestamp = dt_util.now().strftime("%Y%m%d_%H%M%S")
         filename = f"ev_optimizer_debug_{timestamp}.{output_format}"
         filepath = www_path / filename
         
-        # Write file
+        # Serialise on the loop (cheap), write off it (not cheap, and blocking
+        # file I/O in the event loop makes Home Assistant complain).
         if output_format == "json":
-            with open(filepath, "w") as f:
-                json.dump(export_data, f, indent=2)
+            contents = json.dumps(export_data, indent=2, default=str)
         elif output_format == "yaml":
             import yaml
-            with open(filepath, "w") as f:
-                yaml.dump(export_data, f, default_flow_style=False)
+            contents = yaml.dump(export_data, default_flow_style=False)
         elif output_format == "html":
-            html = self._generate_html_report(export_data)
-            with open(filepath, "w") as f:
-                f.write(html)
+            contents = self._generate_html_report(export_data)
         else:
             raise ValueError(f"Unsupported format: {output_format}")
+
+        await self.hass.async_add_executor_job(
+            self._write_export, filepath, contents
+        )
         
         _LOGGER.info(f"Exported {len(filtered_snapshots)} snapshots to {filename}")
         return f"/local/{filename}"
     
+    @staticmethod
+    def _write_export(filepath, contents: str):
+        """Blocking write, run in an executor."""
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        with open(filepath, "w") as handle:
+            handle.write(contents)
+
     def _generate_html_report(self, export_data: dict) -> str:
         """Generate HTML report from export data."""
         snapshots = export_data["snapshots"]

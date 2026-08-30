@@ -31,10 +31,10 @@ async def async_setup_entry(
 
     async_add_entities([
         # Manual Target: 50-100%, step 10%
-        EVChargeTargetNumber(coordinator, ENTITY_TARGET_SOC, "Standard Target SoC", 50, 100, 80, step=10),
+        EVChargeTargetNumber(coordinator, ENTITY_TARGET_SOC, "Standard Target SoC", 50, 100, 80, step=5),
         
         # Override Target: 50-100%, step 10% (New Entity)
-        EVChargeTargetNumber(coordinator, ENTITY_TARGET_OVERRIDE, "Next Session Target SoC", 50, 100, 80, step=10),
+        EVChargeTargetNumber(coordinator, ENTITY_TARGET_OVERRIDE, "Next Session Target SoC", 50, 100, 80, step=5),
         
         # Min Guarantee: 10-50%, default step 1%
         EVChargeTargetNumber(coordinator, ENTITY_MIN_SOC, "Minimum Guaranteed SoC", 10, 50, 20),

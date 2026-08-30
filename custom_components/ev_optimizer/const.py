@@ -42,6 +42,35 @@ CONF_CHARGER_CURRENT_L3 = "charger_current_l3"
 # sensors, and without those from the fuse rating.
 CONF_CHARGER_POWER_SENSOR = "charger_power_sensor"
 
+# Optional: a cumulative energy sensor for the charger (kWh, total_increasing).
+# The best available ground truth — it needs no voltage or phase-count
+# assumption and cannot drift, because it reports what actually flowed rather
+# than what was commanded. Optional like the rest; see MEASUREMENT_SOURCES.
+CONF_CHARGER_ENERGY_SENSOR = "charger_energy_sensor"
+
+# How delivered energy is established, best source first. Each rung is used only
+# if the ones above it are unconfigured or unusable, and the last one is the
+# original behaviour, so an installation with none of these sensors is
+# unaffected.
+#
+#   energy   - cumulative kWh meter, differenced between updates
+#   power    - power sensor integrated over the interval
+#   current  - per-phase currents summed x nominal voltage, integrated
+#   commanded- the current we asked for, integrated (assumes it was delivered)
+MEASUREMENT_SOURCES = ("energy", "power", "current", "commanded")
+
+# Slot-selection preferences. Both default OFF, so the schedule is chosen exactly
+# as it always has been — the N cheapest slots before departure, wherever they
+# fall — unless the user opts in.
+#
+# CONF_CONTIGUOUS_CHARGING: pick the cheapest *unbroken run* of slots instead of
+#   the cheapest individual ones. Costs a little more; charges in one stretch.
+# CONF_PREFER_LATE_SLOTS: among slots that cost the same, take the later ones,
+#   so the battery reaches a high state of charge near departure rather than
+#   hours before it.
+CONF_CONTIGUOUS_CHARGING = "contiguous_charging"
+CONF_PREFER_LATE_SLOTS = "prefer_late_slots"
+
 # Nominal mains voltage, used only to turn currents into power when no power
 # sensor is configured.
 NOMINAL_VOLTAGE = 230.0

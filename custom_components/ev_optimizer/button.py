@@ -102,7 +102,7 @@ class EVDumpDebugStateButton(CoordinatorEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Handle the button press."""
-        self.coordinator.dump_debug_state()
+        await self.coordinator.async_dump_debug_state()
 
 
 class EVDumpCustomScenarioButton(CoordinatorEntity, ButtonEntity):
@@ -114,7 +114,7 @@ class EVDumpCustomScenarioButton(CoordinatorEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Handle the button press."""
-        self.coordinator.dump_custom_scenario()
+        await self.coordinator.async_dump_custom_scenario()
 
 
 class ResetEfficiencyLearningButton(CoordinatorEntity, ButtonEntity):

@@ -56,6 +56,7 @@
           "charger_current_l2": "Charger Current L2",
           "charger_current_l3": "Charger Current L3",
           "charger_power_sensor": "Charger Power",
+          "charger_energy_sensor": "Charger Energy Meter",
           "max_fuse": "Main Fuse Size"
         },
         "data_description": {
@@ -66,6 +67,7 @@
           "charger_current_l2": "Optional: Specific current usage of the charger (L2).",
           "charger_current_l3": "Optional: Specific current usage of the charger (L3).",
           "charger_power_sensor": "Optional: A sensor reporting the power the charger actually delivers. Used to size charging plans on measured performance; falls back to the current sensors above, then to the fuse rating.",
+          "charger_energy_sensor": "Optional: A cumulative energy meter for the charger. The most accurate source available - used for state-of-charge estimation and session totals. Falls back to the power sensor, then the current sensors, then the commanded current.",
           "max_fuse": "The size of your main household fuse (Amps) to prevent tripping."
         }
       },
@@ -95,7 +97,9 @@
           "price_limit_1": "Price Limit: Cheap (Low)",
           "target_soc_1": "Target SoC at Cheap Prices",
           "price_limit_2": "Price Limit: Acceptable (High)",
-          "target_soc_2": "Target SoC at Acceptable Prices"
+          "target_soc_2": "Target SoC at Acceptable Prices",
+          "prefer_late_slots": "Finish charging close to departure",
+          "contiguous_charging": "Charge in one unbroken block"
         },
         "data_description": {
           "departure_time": "Your typical daily departure time (e.g., 07:00 for morning commute).",
@@ -104,7 +108,9 @@
           "price_limit_1": "Nordpool price threshold for 'very cheap' electricity (before taxes). When spot price is below this, charge opportunistically.",
           "target_soc_1": "Target SoC when prices are very cheap (typically 90-100% to take advantage).",
           "price_limit_2": "Nordpool price threshold for 'acceptable' electricity (before taxes). Charge to this target when prices are moderate.",
-          "target_soc_2": "Target SoC when prices are acceptable (typically 70-80%)."
+          "target_soc_2": "Target SoC when prices are acceptable (typically 70-80%).",
+          "prefer_late_slots": "When several slots cost the same, use the later ones. Costs nothing extra and leaves the battery at a high state of charge for fewer hours before you leave.",
+          "contiguous_charging": "Charge in a single unbroken stretch instead of the cheapest scattered slots. Usually costs a little more, but starts and stops the charger only once."
         }
       }
     }
@@ -173,6 +179,7 @@
           "charger_current_l2": "Charger Current L2",
           "charger_current_l3": "Charger Current L3",
           "charger_power_sensor": "Charger Power",
+          "charger_energy_sensor": "Charger Energy Meter",
           "max_fuse": "Main Fuse Size"
         },
         "data_description": {
@@ -183,6 +190,7 @@
           "charger_current_l2": "Optional: Specific current usage of the charger (L2).",
           "charger_current_l3": "Optional: Specific current usage of the charger (L3).",
           "charger_power_sensor": "Optional: A sensor reporting the power the charger actually delivers. Used to size charging plans on measured performance; falls back to the current sensors above, then to the fuse rating.",
+          "charger_energy_sensor": "Optional: A cumulative energy meter for the charger. The most accurate source available - used for state-of-charge estimation and session totals. Falls back to the power sensor, then the current sensors, then the commanded current.",
           "max_fuse": "The size of your main household fuse (Amps) to prevent tripping."
         }
       },
@@ -212,7 +220,9 @@
           "price_limit_1": "Price Limit: Cheap (Low)",
           "target_soc_1": "Target SoC at Cheap Prices",
           "price_limit_2": "Price Limit: Acceptable (High)",
-          "target_soc_2": "Target SoC at Acceptable Prices"
+          "target_soc_2": "Target SoC at Acceptable Prices",
+          "prefer_late_slots": "Finish charging close to departure",
+          "contiguous_charging": "Charge in one unbroken block"
         },
         "data_description": {
           "departure_time": "Your typical daily departure time (e.g., 07:00 for morning commute).",
@@ -221,7 +231,9 @@
           "price_limit_1": "Nordpool price threshold for 'very cheap' electricity (before taxes). When spot price is below this, charge opportunistically.",
           "target_soc_1": "Target SoC when prices are very cheap (typically 90-100% to take advantage).",
           "price_limit_2": "Nordpool price threshold for 'acceptable' electricity (before taxes). Charge to this target when prices are moderate.",
-          "target_soc_2": "Target SoC when prices are acceptable (typically 70-80%)."
+          "target_soc_2": "Target SoC when prices are acceptable (typically 70-80%).",
+          "prefer_late_slots": "When several slots cost the same, use the later ones. Costs nothing extra and leaves the battery at a high state of charge for fewer hours before you leave.",
+          "contiguous_charging": "Charge in a single unbroken stretch instead of the cheapest scattered slots. Usually costs a little more, but starts and stops the charger only once."
         }
       }
     }

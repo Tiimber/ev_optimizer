@@ -10,6 +10,7 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     EntitySelector,
     EntitySelectorConfig,
     NumberSelector,
@@ -51,6 +52,9 @@ from .const import (
     CONF_CHARGER_CURRENT_L2,
     CONF_CHARGER_CURRENT_L3,
     CONF_CHARGER_POWER_SENSOR,
+    CONF_CHARGER_ENERGY_SENSOR,
+    CONF_CONTIGUOUS_CHARGING,
+    CONF_PREFER_LATE_SLOTS,
     REFRESH_NEVER,
     REFRESH_30_MIN,
     REFRESH_1_HOUR,
@@ -303,6 +307,17 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): EntitySelector(
                     EntitySelectorConfig(domain="sensor", device_class="power")
                 ),
+                # Optional, and the best source there is: a cumulative kWh meter
+                # needs no voltage or phase-count assumption and reports what
+                # actually flowed rather than what was commanded.
+                vol.Optional(
+                    CONF_CHARGER_ENERGY_SENSOR,
+    CONF_CONTIGUOUS_CHARGING,
+    CONF_PREFER_LATE_SLOTS,
+                    default=defaults.get(CONF_CHARGER_ENERGY_SENSOR),
+                ): EntitySelector(
+                    EntitySelectorConfig(domain="sensor", device_class="energy")
+                ),
                 vol.Required(
                     CONF_MAX_FUSE, default=defaults.get(CONF_MAX_FUSE, DEFAULT_MAX_FUSE)
                 ): NumberSelector(
@@ -362,6 +377,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ENTITY_DEPARTURE_TIME,
                     default=defaults.get(ENTITY_DEPARTURE_TIME, DEFAULT_DEPARTURE_TIME),
                 ): TextSelector(TextSelectorConfig(type=TextSelectorType.TIME)),
+                # Both off by default: slot selection is unchanged unless asked.
+                vol.Optional(
+                    CONF_PREFER_LATE_SLOTS,
+                    default=defaults.get(CONF_PREFER_LATE_SLOTS, False),
+                ): BooleanSelector(),
+                vol.Optional(
+                    CONF_CONTIGUOUS_CHARGING,
+                    default=defaults.get(CONF_CONTIGUOUS_CHARGING, False),
+                ): BooleanSelector(),
                 vol.Required(
                     ENTITY_TARGET_SOC,
                     default=defaults.get(ENTITY_TARGET_SOC, DEFAULT_TARGET_SOC),

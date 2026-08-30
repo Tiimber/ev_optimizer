@@ -46,6 +46,9 @@ from .const import (
     CONF_CHARGER_CURRENT_L2,
     CONF_CHARGER_CURRENT_L3,
     CONF_CHARGER_POWER_SENSOR,
+    CONF_CHARGER_ENERGY_SENSOR,
+    CONF_CONTIGUOUS_CHARGING,
+    CONF_PREFER_LATE_SLOTS,
     NOMINAL_VOLTAGE,
     DEFAULT_CURRENCY,
     DEFAULT_LOSS,
@@ -162,6 +165,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         self._last_car_refresh_time = None
         self._refresh_trigger_timestamp = None
         self._soc_before_refresh = None
+        self._sensor_soc_at_refresh = None
 
         # State tracking to prevent API spamming
         self._last_applied_amps = -1
@@ -221,6 +225,24 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         self._calendar_events = []
         self._calendar_cache_time = None
 
+        # Guards set_user_input against queuing a refresh while one is running
+        self._in_update = False
+
+        # Cumulative energy meter baseline, and which rung of the measurement
+        # chain last answered (surfaced on the virtual SoC sensor)
+        self._last_energy_reading = None
+        self.energy_source = "none"
+
+        # Recorded when a debug dump is written, so the sensor reporting it does
+        # not have to stat the filesystem from the event loop on every update
+        self._last_debug_dump_path = None
+        self._last_debug_dump_size = None
+        self._last_debug_dump_time = None
+
+        # True until the first price observation, so a restart is not mistaken
+        # for tomorrow's prices arriving at the moment Home Assistant came up
+        self._price_arrival_priming = True
+
         # Automatic image generation tracking
         self._last_plan_image_signature = None
         self._last_report_generated = False
@@ -251,6 +273,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             "car_capacity": float(get_conf(CONF_CAR_CAPACITY)),
             "currency": get_conf(CONF_CURRENCY, DEFAULT_CURRENCY),
             "has_price_sensor": bool(get_conf(CONF_PRICE_SENSOR)),
+            # Both default off: an existing install keeps choosing slots the
+            # way it always has until the user opts in.
+            "contiguous_charging": bool(get_conf(CONF_CONTIGUOUS_CHARGING, False)),
+            "prefer_late_slots": bool(get_conf(CONF_PREFER_LATE_SLOTS, False)),
         }
 
         self.car_capacity = self.config_settings["car_capacity"]
@@ -297,6 +323,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             "ch_l2": get_conf(CONF_CHARGER_CURRENT_L2),
             "ch_l3": get_conf(CONF_CHARGER_CURRENT_L3),
             "charger_power": get_conf(CONF_CHARGER_POWER_SENSOR),
+            "charger_energy": get_conf(CONF_CHARGER_ENERGY_SENSOR),
             "refresh_svc": get_conf(CONF_CAR_REFRESH_ACTION),
             "refresh_int": get_conf(CONF_CAR_REFRESH_INTERVAL),
         }
@@ -539,7 +566,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
         self._save_data()
 
-        if self.data:
+        # Called from inside _async_update_data during plug/unplug handling,
+        # where scheduling another refresh just queues a redundant pass — the
+        # update already in flight picks the new value up.
+        if self.data and not self._in_update:
             self.hass.async_create_task(self.async_refresh())
 
     def clear_manual_override(self):
@@ -553,7 +583,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
         self._save_data()
 
-        if self.data:
+        if self.data and not self._in_update:
             self.hass.async_create_task(self.async_refresh())
 
     async def async_trigger_report_generation(self):
@@ -680,10 +710,11 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Update data via library."""
         start_time = perf_counter()
-        
+
         if not self._data_loaded:
             await self._load_data()
 
+        self._in_update = True
         try:
             data = self._fetch_sensor_data()
             data.update(self.user_settings)
@@ -786,6 +817,8 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.error(f"Error in EV Coordinator: {err}")
             raise UpdateFailed(f"Error communicating with API: {err}")
+        finally:
+            self._in_update = False
 
     async def _async_get_calendar_events(self) -> list:
         """Fetch upcoming calendar events, cached.
@@ -1157,6 +1190,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             # baseline left over from some earlier refresh made that verdict
             # arbitrary.
             self._soc_before_refresh = self._virtual_soc
+            self._sensor_soc_at_refresh = self._last_sensor_soc
             if trigger_learning:
                 self._add_log(f"Forcing Car Refresh for Learning (Virtual SoC: {self._virtual_soc:.1f}%)")
             else:
@@ -1192,6 +1226,97 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         self._anchor_time = None
         self._anchor_loss_used = None
         self._anchor_suspect = False
+
+    def _read_energy_meter(self) -> float | None:
+        """Current reading of the configured cumulative energy meter, in kWh."""
+        entity_id = self.conf_keys.get("charger_energy")
+        if not entity_id:
+            return None
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in [STATE_UNAVAILABLE, STATE_UNKNOWN]:
+            return None
+        try:
+            value = float(state.state)
+        except (TypeError, ValueError):
+            return None
+        unit = str((state.attributes or {}).get("unit_of_measurement", "")).strip()
+        if unit.upper() == "WH":
+            value /= 1000.0
+        return value
+
+    def _read_energy_meter_baseline(self):
+        """Re-baseline the energy meter without booking the delta.
+
+        Called while not charging, so that energy metered during a pause — or
+        by some other consumer sharing the meter — is not attributed to the car
+        the moment charging resumes.
+        """
+        reading = self._read_energy_meter()
+        if reading is not None:
+            self._last_energy_reading = reading
+
+    def _read_charger_power_kw(self, data: dict) -> float | None:
+        """Instantaneous charger power in kW, from the best available source."""
+        entity_id = self.conf_keys.get("charger_power")
+        if entity_id:
+            state = self.hass.states.get(entity_id)
+            if state is not None and state.state not in [STATE_UNAVAILABLE, STATE_UNKNOWN]:
+                try:
+                    value = float(state.state)
+                except (TypeError, ValueError):
+                    value = None
+                if value is not None:
+                    unit = str((state.attributes or {}).get("unit_of_measurement", ""))
+                    return value / 1000.0 if unit.upper().startswith("W") else value
+
+        phases = [data.get("ch_l1", 0.0), data.get("ch_l2", 0.0), data.get("ch_l3", 0.0)]
+        total_amps = sum(a for a in phases if a and a > 0)
+        if total_amps > 0:
+            # Summed, not 3 x the largest: correct for single-phase chargers too.
+            return (NOMINAL_VOLTAGE * total_amps) / 1000.0
+
+        return None
+
+    def _measure_energy_delta(self, data: dict, hours: float) -> tuple[float, str]:
+        """Energy delivered since the previous update, in kWh.
+
+        Walks MEASUREMENT_SOURCES from most to least trustworthy. The bottom
+        rung — integrating the current we *commanded* — is what this integration
+        always did, and it is the one that drifts: if the car stops accepting
+        charge, nothing measures that, and the estimate keeps climbing. Any of
+        the rungs above it makes that impossible, so this is worth configuring.
+        """
+        meter = self._read_energy_meter()
+        if meter is not None:
+            previous = self._last_energy_reading
+            self._last_energy_reading = meter
+            if previous is not None:
+                delta = meter - previous
+                if delta < 0:
+                    # The meter reset (integration reload, device reboot). One
+                    # interval of energy is lost; inventing a value from a
+                    # cumulative counter that just went backwards would be worse.
+                    _LOGGER.info(
+                        "Charger energy meter went backwards (%.3f -> %.3f kWh); "
+                        "treating this interval as zero and re-baselining",
+                        previous, meter,
+                    )
+                    return 0.0, "energy"
+                return delta, "energy"
+            # First reading only establishes the baseline.
+            return 0.0, "energy"
+
+        power_kw = self._read_charger_power_kw(data)
+        if power_kw is not None:
+            source = "power" if self.conf_keys.get("charger_power") else "current"
+            return power_kw * hours, source
+
+        # Last resort: assume the commanded current was actually delivered.
+        if self._last_applied_amps and self._last_applied_amps > 0:
+            commanded_kw = (3 * NOMINAL_VOLTAGE * self._last_applied_amps) / 1000.0
+            return commanded_kw * hours, "commanded"
+
+        return 0.0, "none"
 
     def _observe_charge_power(self, data: dict):
         """Learn how much power this setup actually delivers while charging.
@@ -1497,12 +1622,18 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             if state_obj is None or state_obj.state in [STATE_UNAVAILABLE, STATE_UNKNOWN]:
                 sensor_state_valid = False
 
+        # Did the forced refresh actually produce a new reading? That is a
+        # question about the sensor, so compare against what the sensor said
+        # when the refresh went out — comparing against the *estimate* at that
+        # moment conflated "the car reported something new" with "the car
+        # disagrees with us", and answered wrongly in both directions.
         trust_sensor_period = False
         if self._refresh_trigger_timestamp:
             if (current_time - self._refresh_trigger_timestamp) < timedelta(minutes=5):
                 if (
                     sensor_soc is not None
-                    and float(sensor_soc) != self._soc_before_refresh
+                    and self._sensor_soc_at_refresh is not None
+                    and abs(float(sensor_soc) - self._sensor_soc_at_refresh) > 0.05
                 ):
                     trust_sensor_period = True
 
@@ -1557,24 +1688,21 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             self._last_sensor_soc = sensor_soc_f
 
         if self._last_applied_state == "charging":
+            seconds_passed = (current_time - self._last_update_time).total_seconds()
+            hours_passed = max(0.0, seconds_passed / 3600.0)
+
+            grid_kwh, source = self._measure_energy_delta(data, hours_passed)
+            data["energy_source"] = source
+            self.energy_source = source
+
             ch_l1 = data.get("ch_l1", 0.0)
             ch_l2 = data.get("ch_l2", 0.0)
             ch_l3 = data.get("ch_l3", 0.0)
-            measured_amps = max(ch_l1, ch_l2, ch_l3)
-            used_amps = (
-                measured_amps if measured_amps > 0.5 else self._last_applied_amps
-            )
 
-            # The fallback to the *commanded* current exists because the
-            # charger's per-phase sensors can lag. But if the car has simply
-            # stopped accepting charge (it hit its own limit, or ended the
-            # session) the measured current stays near zero indefinitely,
-            # and every cycle from then on adds energy that never flowed.
-            if measured_amps > 0.5:
-                self._amps_fallback_since = None
-                self._amps_fallback_logged = False
-                self.charge_estimate_drift_active = False
-            elif self._last_applied_amps > 0:
+            # Only the bottom rung of the chain can invent energy that never
+            # flowed. Watch it the same way as before; the rungs above it
+            # measure reality and cannot drift this way.
+            if source == "commanded":
                 # Energy we believe flowed but did not measure must not teach
                 # the model anything.
                 self._anchor_suspect = True
@@ -1587,17 +1715,19 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                     self._amps_fallback_logged = True
                     self.charge_estimate_drift_active = True
                     _LOGGER.error(
-                        "Charger has measured <0.5A for over 5 minutes while %sA "
+                        "No measured charger output for over 5 minutes while %sA "
                         "was commanded; the virtual SoC is still being advanced "
-                        "using the commanded value and may now be too high. "
-                        "Measured phases: %.2f/%.2f/%.2f A",
+                        "from the commanded value and may now be too high. "
+                        "Measured phases: %.2f/%.2f/%.2f A. Configuring a charger "
+                        "energy or power sensor would remove this guesswork.",
                         self._last_applied_amps, ch_l1, ch_l2, ch_l3,
                     )
+            else:
+                self._amps_fallback_since = None
+                self._amps_fallback_logged = False
+                self.charge_estimate_drift_active = False
 
-            if used_amps > 0:
-                seconds_passed = (current_time - self._last_update_time).total_seconds()
-                hours_passed = seconds_passed / 3600.0
-                estimated_power_kw = (3 * 230 * used_amps) / 1000.0
+            if grid_kwh > 0:
                 # The estimator and the planner must run on the same efficiency
                 # figure. They used to disagree — this read the raw value from
                 # entry.data, ignoring both the options flow and everything
@@ -1607,7 +1737,8 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                     self.config_settings, self.learning_state
                 )
                 efficiency_factor = 1.0 - (efficiency_pct / 100.0)
-                added_kwh = estimated_power_kw * hours_passed * efficiency_factor
+                added_kwh = grid_kwh * efficiency_factor
+                self.session_manager.add_grid_energy(grid_kwh, data)
 
                 if self.car_capacity > 0:
                     added_percent = (added_kwh / self.car_capacity) * 100.0
@@ -1621,6 +1752,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                     if self._virtual_soc > 100.0:
                         self._virtual_soc = 100.0
                         self._anchor_suspect = True
+        else:
+            # Keep the meter baseline current while paused, so resuming does not
+            # book the idle gap as a single huge delivery.
+            self._read_energy_meter_baseline()
 
         self._last_update_time = current_time
         return trust_sensor_period
@@ -1944,7 +2079,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 _LOGGER.error("Failed to reset session state on plug-in", exc_info=True)
 
         if not is_plugged and self.previous_plugged_state:
-            self._finalize_session(final_soc=data.get("car_soc"))
+            await self._finalize_session(final_soc=self._final_soc_for_report(data))
             self.manual_override_active = False
             
             # Clear image generation tracking for next session
@@ -1988,12 +2123,41 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
         self.previous_plugged_state = is_plugged
 
+    def _final_soc_for_report(self, data: dict) -> float | None:
+        """Pick the best SoC to close a session report on.
+
+        _handle_plugged_event runs before _update_virtual_soc, so at this point
+        data["car_soc"] is this cycle's raw sensor reading while _virtual_soc is
+        the estimate as of the previous cycle. Neither is always right:
+
+        - if the car reported a new value this cycle, that reading is the truth
+          and the estimate has not caught up to it yet;
+        - if it did not, the reading is the stale value the estimate exists to
+          paper over, and the estimate is closer.
+
+        So prefer a genuinely fresh reading, and fall back to the estimate.
+        """
+        sensor_soc = data.get("car_soc")
+        try:
+            sensor_soc = float(sensor_soc) if sensor_soc is not None else None
+        except (TypeError, ValueError):
+            sensor_soc = None
+
+        reported_fresh = (
+            sensor_soc is not None
+            and self._last_sensor_soc is not None
+            and abs(sensor_soc - self._last_sensor_soc) > 0.05
+        )
+        if reported_fresh:
+            return sensor_soc
+        return self._virtual_soc or sensor_soc
+
     def _record_session_data(self, data):
         self.session_manager.record_data_point(
             data, self.user_settings, self._last_applied_amps, self._last_applied_state
         )
 
-    def _finalize_session(self, final_soc=None):
+    async def _finalize_session(self, final_soc=None):
         report = self.session_manager.stop_session(self.user_settings, self.currency, final_soc=final_soc)
         
         # The single place a completed session is counted. The efficiency
@@ -2014,11 +2178,59 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 save_path = self.hass.config.path(
                     "www", "ev_optimizer_last_session.png"
                 )
-                self.hass.async_add_executor_job(generate_report_image, report, save_path)
+                await self.hass.async_add_executor_job(
+                    generate_report_image, report, save_path
+                )
                 self._add_log("Session Report Image Auto-Generated")
             except Exception as e:
                 _LOGGER.warning(f"Could not auto-generate report image: {e}")
     
+    @staticmethod
+    def _write_text_file(file_path: str, contents: str):
+        """Blocking write, intended to be handed to an executor."""
+        import os
+
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, "w") as handle:
+            handle.write(contents)
+
+    async def _async_save_dump(self, dump: dict, label: str) -> str | None:
+        """Persist a debug dump without blocking the event loop.
+
+        `open()` and `os.makedirs` on the loop make Home Assistant log a
+        blocking-call warning, and these payloads are large enough that the
+        write is genuinely felt.
+        """
+        file_path = dump.get("_file_path")
+        contents = dump.get("_json")
+        if not file_path or contents is None:
+            return None
+        try:
+            await self.hass.async_add_executor_job(
+                self._write_text_file, file_path, contents
+            )
+        except Exception:
+            _LOGGER.error("Failed to save %s to %s", label, file_path, exc_info=True)
+            return None
+
+        _LOGGER.info("✅ %s saved to: %s", label, file_path)
+        self._last_debug_dump_path = file_path
+        self._last_debug_dump_size = len(contents.encode("utf-8"))
+        self._last_debug_dump_time = datetime.now()
+        return file_path
+
+    async def async_dump_debug_state(self) -> dict:
+        """Build the debug dump and write it to disk off the loop."""
+        dump = self.dump_debug_state()
+        await self._async_save_dump(dump, "Debug dump")
+        return dump
+
+    async def async_dump_custom_scenario(self) -> dict:
+        """Build the custom scenario and write it to disk off the loop."""
+        dump = self.dump_custom_scenario()
+        await self._async_save_dump(dump, "Custom scenario")
+        return dump
+
     def dump_debug_state(self) -> dict:
         """Dump complete state for debugging/simulation purposes.
         
@@ -2123,37 +2335,18 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             "entity_ids": {k: v for k, v in self.conf_keys.items() if v},
         }
         
-        # Format as JSON
         json_dump = json.dumps(debug_dump, indent=2, default=str)
-        
-        # Save to file
-        file_path = self.hass.config.path("www", "ev_optimizer_debug_dump.json")
-        _LOGGER.debug(f"💾 Saving debug dump to: {file_path}")
-        
-        try:
-            import os
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            with open(file_path, 'w') as f:
-                f.write(json_dump)
-            _LOGGER.info(f"✅ Debug dump saved to: {file_path}")
-            _LOGGER.info(f"📥 Download at: /local/ev_optimizer_debug_dump.json")
-            
-            # Also log to console for easy copy/paste
-            _LOGGER.info("=" * 80)
-            _LOGGER.info("DEBUG STATE DUMP - Also saved to file above")
-            _LOGGER.info("=" * 80)
-            _LOGGER.info(json_dump)
-            _LOGGER.info("=" * 80)
-            
-        except Exception as e:
-            _LOGGER.error(f"❌ Failed to save debug dump to file: {e}")
-            # Still log it even if file save fails
-            _LOGGER.info("=" * 80)
-            _LOGGER.info("DEBUG STATE DUMP (file save failed, logging only)")
-            _LOGGER.info("=" * 80)
-            _LOGGER.info(json_dump)
-            _LOGGER.info("=" * 80)
-        
+        debug_dump["_json"] = json_dump
+        debug_dump["_file_path"] = self.hass.config.path(
+            "www", "ev_optimizer_debug_dump.json"
+        )
+
+        _LOGGER.info("=" * 80)
+        _LOGGER.info("DEBUG STATE DUMP")
+        _LOGGER.info("=" * 80)
+        _LOGGER.info(json_dump)
+        _LOGGER.info("=" * 80)
+
         return debug_dump
 
     def dump_custom_scenario(self) -> dict:
@@ -2266,49 +2459,49 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             },
         }
         
-        # Format as JSON
         json_dump = json.dumps(custom_dump, indent=2, default=str)
-        
-        # Save to file
-        file_path = self.hass.config.path("www", "ev_optimizer_custom_scenario.json")
-        _LOGGER.debug(f"💾 Saving custom scenario to: {file_path}")
-        
-        try:
-            import os
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            with open(file_path, 'w') as f:
-                f.write(json_dump)
-            _LOGGER.info(f"✅ Custom scenario saved to: {file_path}")
-            _LOGGER.info(f"📥 Download at: /local/ev_optimizer_custom_scenario.json")
-            
-            # Also log summary
-            _LOGGER.info("=" * 80)
-            _LOGGER.info("CUSTOM DEBUG SCENARIO SAVED")
-            _LOGGER.info("=" * 80)
-            _LOGGER.info(f"Current Time: {debug_current_time}")
-            _LOGGER.info(f"Departure: {debug_departure_time}")
-            _LOGGER.info(f"Current SoC: {debug_current_soc}%")
-            _LOGGER.info(f"Target SoC: {debug_target_soc}%")
-            _LOGGER.info(f"Tomorrow prices: {'faked (copied from today)' if not price_data.get('tomorrow_valid') else 'real'}")
-            _LOGGER.info(f"Download: /local/ev_optimizer_custom_scenario.json")
-            _LOGGER.info("=" * 80)
-            
-        except Exception as e:
-            _LOGGER.error(f"❌ Failed to save custom scenario to file: {e}")
-        
+        custom_dump["_json"] = json_dump
+        custom_dump["_file_path"] = self.hass.config.path(
+            "www", "ev_optimizer_custom_scenario.json"
+        )
+
+        _LOGGER.info("=" * 80)
+        _LOGGER.info("CUSTOM DEBUG SCENARIO")
+        _LOGGER.info("=" * 80)
+        _LOGGER.info(f"Current Time: {debug_current_time}")
+        _LOGGER.info(f"Departure: {debug_departure_time}")
+        _LOGGER.info(f"Current SoC: {debug_current_soc}%")
+        _LOGGER.info(f"Target SoC: {debug_target_soc}%")
+        _LOGGER.info("=" * 80)
+
         return custom_dump
 
     def _track_price_arrival(self, price_data: dict):
         """Track when tomorrow's prices become available to learn the pattern."""
         tomorrow_valid = price_data.get("tomorrow_valid", False) or bool(price_data.get("tomorrow"))
-        
+
+        # The first observation after a restart is not an arrival — tomorrow's
+        # prices were most likely already there before Home Assistant came up.
+        # Recording it anyway stamped a bogus arrival at whatever time the
+        # restart happened, which then dragged the learned average around.
+        if self._price_arrival_priming:
+            self._price_arrival_priming = False
+            self._last_tomorrow_valid = tomorrow_valid
+            return
+
         # Detect transition from no tomorrow prices to having tomorrow prices
         if tomorrow_valid and not self._last_tomorrow_valid:
             now = datetime.now()
             arrival_time = now.strftime("%H:%M")
-            
-            # Add to history (keep last 14 days)
+
             price_arrivals = self.learning_state.get(LEARNING_PRICE_ARRIVAL, [])
+            today_iso = now.date().isoformat()
+            if any(entry.get("date") == today_iso for entry in price_arrivals):
+                # Already recorded an arrival for this date; a second one means
+                # the sensor flapped, not that prices arrived twice.
+                self._last_tomorrow_valid = tomorrow_valid
+                return
+
             price_arrivals.append({
                 "date": now.date().isoformat(),
                 "time": arrival_time,
