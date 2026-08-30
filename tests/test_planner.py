@@ -470,7 +470,7 @@ def test_calendar_event_too_far_in_future_uses_default_time():
     plan = planner.generate_charging_plan(data, config, manual_override=False, now=now)
     
     # Should use default time (07:00 tomorrow = Feb 23 07:00), not Feb 24 08:30
-    departure_dt = datetime.fromisoformat(plan["departure_time"])
+    departure_dt = datetime.fromisoformat(plan["plan_departure_time"])
     assert departure_dt.date().day == 23  # Feb 23 (tomorrow), not Feb 24
     assert departure_dt.hour == 7  # Default time 07:00
     assert departure_dt.minute == 0
@@ -522,7 +522,7 @@ def test_calendar_event_tomorrow_with_full_today_prices_should_plan():
     assert first_start.date().day == 22, "First charging slot should be on Feb 22 (today)"
     
     # At midnight, should use manual departure (Feb 22 07:00), NOT tomorrow's calendar event
-    departure_dt = datetime.fromisoformat(plan["departure_time"])
+    departure_dt = datetime.fromisoformat(plan["plan_departure_time"])
     assert departure_dt.date().day == 22, "Should use manual departure for today, not tomorrow's calendar"
     assert departure_dt.hour == 7
     assert departure_dt.minute == 0
@@ -560,7 +560,7 @@ def test_calendar_event_today_evening_should_not_wait():
     assert "Waiting for additional price data" not in plan.get("charging_summary", "")
     
     # Departure should be today at 18:00
-    departure_dt = datetime.fromisoformat(plan["departure_time"])
+    departure_dt = datetime.fromisoformat(plan["plan_departure_time"])
     assert departure_dt.date().day == 22
     assert departure_dt.hour == 18
     assert "(Calendar)" in plan["charging_summary"]
@@ -654,7 +654,7 @@ def test_saturday_night_with_monday_calendar_event_should_charge_before_sunday_d
         "Should not wait for Monday prices when departure is Sunday"
     
     # 2. Should use Sunday 07:02 as departure (manual), NOT Monday 05:20 (calendar)
-    departure_dt = datetime.fromisoformat(plan["departure_time"])
+    departure_dt = datetime.fromisoformat(plan["plan_departure_time"])
     assert departure_dt.date().day == 15, \
         f"Should use Sunday (15th) departure, got {departure_dt.strftime('%A %d')}"
     assert departure_dt.hour == 7 and departure_dt.minute == 2, \
@@ -732,7 +732,7 @@ def test_saturday_afternoon_with_monday_calendar_should_use_manual_until_sunday_
     
     # At Saturday afternoon, Monday event is beyond tomorrow's cutoff
     # Should use manual departure rolled to Sunday 07:02
-    departure_dt = datetime.fromisoformat(plan["departure_time"])
+    departure_dt = datetime.fromisoformat(plan["plan_departure_time"])
     assert departure_dt.date().day == 15, \
         f"Should use Sunday (15th) manual departure, got {departure_dt.strftime('%A %d')}"
     assert departure_dt.hour == 7 and departure_dt.minute == 2, \
@@ -781,7 +781,7 @@ def test_sunday_evening_with_monday_calendar_should_use_calendar():
     plan = planner.generate_charging_plan(data, config, manual_override=False, now=now)
     
     # On Sunday evening, Monday calendar event is now visible (within tomorrow)
-    departure_dt = datetime.fromisoformat(plan["departure_time"])
+    departure_dt = datetime.fromisoformat(plan["plan_departure_time"])
     assert departure_dt.date().day == 16, \
         f"Should use Monday (16th) calendar event, got {departure_dt.strftime('%A %d')}"
     assert departure_dt.hour == 5 and departure_dt.minute == 20, \

@@ -126,7 +126,7 @@ class SnapshotManager:
             "smart_charging_enabled": coordinator_data.get("smart_charging_enabled"),
             "should_charge_now": plan.get("should_charge_now"),
             "planned_target_soc": plan.get("planned_target_soc"),
-            "departure_time": plan.get("departure_time"),
+            "departure_time": plan.get("plan_departure_time"),
             "scheduled_start": plan.get("scheduled_start"),
             "session_end_time": plan.get("session_end_time"),
             

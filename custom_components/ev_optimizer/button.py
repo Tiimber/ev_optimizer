@@ -6,7 +6,20 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, ENTITY_BUTTON_CLEAR_OVERRIDE, LEARNING_CHARGER_LOSS, LEARNING_CONFIDENCE, LEARNING_SESSIONS, LEARNING_LOCKED, LEARNING_HISTORY, LEARNING_LAST_REFRESH, DEFAULT_LOSS
+from .const import (
+    DOMAIN,
+    ENTITY_BUTTON_CLEAR_OVERRIDE,
+    LEARNING_CHARGER_LOSS,
+    LEARNING_CONFIDENCE,
+    LEARNING_SESSIONS,
+    LEARNING_MEASUREMENTS,
+    LEARNING_LOCKED,
+    LEARNING_HISTORY,
+    LEARNING_LAST_REFRESH,
+    LEARNING_MODEL_VERSION,
+    CURRENT_LEARNING_MODEL,
+    DEFAULT_LOSS,
+)
 from .coordinator import EVSmartChargerCoordinator
 
 
@@ -120,11 +133,15 @@ class ResetEfficiencyLearningButton(CoordinatorEntity, ButtonEntity):
             LEARNING_CHARGER_LOSS: configured,
             LEARNING_CONFIDENCE: 0,
             LEARNING_SESSIONS: 0,
+            LEARNING_MEASUREMENTS: 0,
             LEARNING_LOCKED: False,
             LEARNING_HISTORY: [],
             LEARNING_LAST_REFRESH: None,
+            LEARNING_MODEL_VERSION: CURRENT_LEARNING_MODEL,
         })
-        
+        # Any half-open measurement window was anchored against the old value.
+        self.coordinator._reset_learning_window()
+
         self.coordinator._save_data()
         self.coordinator._add_log(
             f"Efficiency learning reset to {configured}% (from config)"

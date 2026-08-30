@@ -18,6 +18,7 @@ def _make_ha_stubs():
     # Add Platform enum stub
     class Platform:
         SENSOR = "sensor"
+        BINARY_SENSOR = "binary_sensor"
         SWITCH = "switch"
         BUTTON = "button"
         NUMBER = "number"
@@ -158,10 +159,19 @@ class HassServices:
         return None
 
 
+class HassBus:
+    def __init__(self):
+        self.events = []
+
+    def async_fire(self, event_type, data=None):
+        self.events.append((event_type, data))
+
+
 class HassMock:
     def __init__(self, states=None):
         self.states = HassStates(states or {})
         self.services = HassServices()
+        self.bus = HassBus()
 
 
 @pytest.fixture

@@ -9,7 +9,17 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, LEARNING_CHARGER_LOSS, LEARNING_CONFIDENCE, LEARNING_SESSIONS, LEARNING_LOCKED, LEARNING_HISTORY
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
+
+from .const import (
+    DOMAIN,
+    LEARNING_CHARGER_LOSS,
+    LEARNING_CONFIDENCE,
+    LEARNING_SESSIONS,
+    LEARNING_MEASUREMENTS,
+    LEARNING_LOCKED,
+    LEARNING_HISTORY,
+)
 from .coordinator import EVSmartChargerCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -32,6 +42,7 @@ async def async_setup_entry(
         EVDebugDumpPathSensor(coordinator), # Debug dump file path
         LearnedEfficiencySensor(coordinator), # Learning efficiency
         EfficiencyConfidenceSensor(coordinator), # Learning confidence
+        EVVirtualSoCSensor(coordinator), # The SoC every decision actually runs on
     ])
 
 class EVSmartChargerBaseSensor(CoordinatorEntity, SensorEntity):
@@ -236,6 +247,7 @@ class LearnedEfficiencySensor(CoordinatorEntity, SensorEntity):
             "confidence_level": confidence,
             "locked": locked,
             "sessions_completed": sessions,
+            "measurements_taken": learning.get(LEARNING_MEASUREMENTS, 0),
             "status": status_text,
             "last_3_measurements": learning.get(LEARNING_HISTORY, [])[-3:],
         }
@@ -278,4 +290,53 @@ class EfficiencyConfidenceSensor(CoordinatorEntity, SensorEntity):
             "locked": locked,
             "sessions": sessions,
             "efficiency_loss_pct": round(learning.get(LEARNING_CHARGER_LOSS, 0.0), 1),
+        }
+
+
+class EVVirtualSoCSensor(CoordinatorEntity, SensorEntity):
+    """The estimated state of charge that every decision is actually made on.
+
+    The car reports its SoC only when it next phones home, so the integration
+    walks an estimate forward between those reports and plans against it. That
+    estimate was previously visible only as an attribute of the status sensor,
+    which made it awkward to graph or alert on.
+    """
+
+    _attr_has_entity_name = False
+    _attr_name = "Virtual State of Charge"
+    _attr_unique_id = "ev_optimizer_virtual_soc"
+    _attr_native_unit_of_measurement = "%"
+    _attr_device_class = SensorDeviceClass.BATTERY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 1
+
+    @property
+    def native_value(self) -> float | None:
+        value = self.coordinator._virtual_soc
+        if not value:
+            return None
+        return round(value, 1)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        coordinator = self.coordinator
+        reported = coordinator._last_sensor_soc
+        drift = None
+        if reported is not None and coordinator._virtual_soc:
+            drift = round(coordinator._virtual_soc - reported, 1)
+
+        anchor_time = coordinator._anchor_time
+        return {
+            "reported_soc": reported,
+            "drift_from_reported": drift,
+            "car_limit_applied": (
+                coordinator._last_applied_car_limit
+                if coordinator._last_applied_car_limit > 0
+                else None
+            ),
+            "charger_state": coordinator._last_applied_state,
+            "measurement_window_open": coordinator._anchor_sensor_soc is not None,
+            "measurement_window_since": (
+                anchor_time.isoformat() if anchor_time else None
+            ),
         }

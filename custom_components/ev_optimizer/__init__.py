@@ -18,6 +18,7 @@ _LOGGER = logging.getLogger(__name__)
 # List the platforms that we will create entities for
 PLATFORMS: list[Platform] = [
     Platform.SENSOR,
+    Platform.BINARY_SENSOR,
     Platform.NUMBER,
     Platform.SWITCH,
     Platform.BUTTON,

@@ -91,8 +91,31 @@ ENTITY_DEBUG_TARGET_SOC = "debug_target_soc"
 # Learning State Keys (for persistence)
 LEARNING_CHARGER_LOSS = "learned_charger_loss"
 LEARNING_CONFIDENCE = "loss_confidence_level"
-LEARNING_SESSIONS = "loss_learning_sessions"
+LEARNING_SESSIONS = "loss_learning_sessions"  # Completed plug-in sessions
+LEARNING_MEASUREMENTS = "loss_measurements"  # Efficiency measurements taken
 LEARNING_LOCKED = "loss_locked"
 LEARNING_HISTORY = "learning_history"
 LEARNING_LAST_REFRESH = "last_refresh_time"
 LEARNING_PRICE_ARRIVAL = "price_arrival_times"  # Track when tomorrow's prices arrive
+LEARNING_MODEL_VERSION = "learning_model_version"
+
+# Bumped whenever the meaning of the learned loss changes. A stored state from
+# an older model is discarded rather than carried forward, because the number
+# was fitted against a different estimator and is not comparable.
+#
+#   1 -> 2: the virtual SoC estimator used the loss from entry.data while the
+#           planner used the learned value, so the loop adjusted a figure that
+#           did not feed the quantity it measured and could never converge.
+CURRENT_LEARNING_MODEL = 2
+
+# Bounds for the learned loss. The figure absorbs every source of model error
+# (charger loss, a mis-configured pack capacity, mains voltage away from 230 V,
+# phase count), so a small negative correction is physically meaningful: it
+# means the estimator under-predicts the car's real SoC gain.
+MIN_LEARNED_LOSS = -10.0
+MAX_LEARNED_LOSS = 30.0
+
+# A measurement window must contain at least this much predicted SoC gain
+# before it says anything about efficiency. Below it, sensor quantisation
+# (the car reports whole percent) dominates the signal.
+MIN_LEARNING_WINDOW_SOC = 3.0

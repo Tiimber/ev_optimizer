@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import math
 from datetime import timedelta, datetime, time
@@ -61,10 +60,16 @@ from .const import (
     LEARNING_CHARGER_LOSS,
     LEARNING_CONFIDENCE,
     LEARNING_SESSIONS,
+    LEARNING_MEASUREMENTS,
     LEARNING_LOCKED,
     LEARNING_HISTORY,
     LEARNING_LAST_REFRESH,
     LEARNING_PRICE_ARRIVAL,
+    LEARNING_MODEL_VERSION,
+    CURRENT_LEARNING_MODEL,
+    MIN_LEARNED_LOSS,
+    MAX_LEARNED_LOSS,
+    MIN_LEARNING_WINDOW_SOC,
     REFRESH_1_HOUR,
     REFRESH_2_HOURS,
     REFRESH_3_HOURS,
@@ -95,7 +100,12 @@ from time import perf_counter
 
 # Imports from helper modules
 from .image_generator import generate_report_image, generate_plan_image
-from .planner import generate_charging_plan, calculate_load_balancing, analyze_prices
+from .planner import (
+    generate_charging_plan,
+    calculate_load_balancing,
+    analyze_prices,
+    get_effective_charger_loss,
+)
 from .session_manager import SessionManager
 from .snapshot_manager import SnapshotManager
 
@@ -152,11 +162,30 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         self._car_limit_write_time = None
         self._amps_fallback_since = None
         self._amps_fallback_logged = False
+        # Public mirrors of the two drift detectors, so they can be surfaced as
+        # entities instead of living only in the log.
+        self.car_limit_drift_active = False
+        self.car_limit_reported = None
+        self.charge_estimate_drift_active = False
 
         # Virtual SoC Estimator
         self._virtual_soc = 0.0
         self._last_update_time = datetime.now()
         self._last_sensor_soc = None  # Track last raw sensor value to detect real updates
+
+        # Efficiency measurement anchors.
+        #
+        # Learning compares the SoC the model predicted against the SoC the car
+        # actually reports, but the car reports only when it next phones home —
+        # measured at 41 minutes on a confirmed-good write. Comparing a live
+        # estimate against a reading of unknown age is meaningless, so both ends
+        # of a measurement are pinned to *real* sensor readings instead: the
+        # window runs from one reported SoC to the next, and any constant
+        # reporting lag cancels between them.
+        self._anchor_sensor_soc = None  # Reported SoC that opened the window
+        self._anchor_time = None
+        self._anchor_loss_used = None  # Effective loss the estimator ran with
+        self._anchor_suspect = False  # Window contains data we should not learn from
 
         # Locked Plan: Lock plan once charging starts to prevent recalculation with stale SoC
         self._locked_plan = None
@@ -217,10 +246,12 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             LEARNING_CHARGER_LOSS: configured_loss,
             LEARNING_CONFIDENCE: 0,
             LEARNING_SESSIONS: 0,
+            LEARNING_MEASUREMENTS: 0,
             LEARNING_LOCKED: False,
             LEARNING_HISTORY: [],
             LEARNING_LAST_REFRESH: None,
             LEARNING_PRICE_ARRIVAL: [],  # Track when tomorrow's prices arrive
+            LEARNING_MODEL_VERSION: CURRENT_LEARNING_MODEL,
         }
         
         # Track when we last saw tomorrow's prices
@@ -339,12 +370,21 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 # Load learning state
                 learning_data = data.get("learning_state", {})
                 if learning_data:
-                    self.learning_state.update(learning_data)
+                    stored_model = learning_data.get(LEARNING_MODEL_VERSION, 1)
+                    if stored_model < CURRENT_LEARNING_MODEL:
+                        # Keep the price-arrival history — that one is a plain
+                        # observation and stays valid across model changes — but
+                        # drop everything fitted by the old estimator.
+                        self._migrate_learning_state(learning_data, stored_model)
+                    else:
+                        self.learning_state.update(learning_data)
                     _LOGGER.info(
-                        "Loaded learning state: loss=%.1f%%, confidence=%d/10, sessions=%d, locked=%s",
+                        "Loaded learning state: loss=%.1f%%, confidence=%d/10, "
+                        "sessions=%d, measurements=%d, locked=%s",
                         self.learning_state.get(LEARNING_CHARGER_LOSS, 0),
                         self.learning_state.get(LEARNING_CONFIDENCE, 0),
                         self.learning_state.get(LEARNING_SESSIONS, 0),
+                        self.learning_state.get(LEARNING_MEASUREMENTS, 0),
                         self.learning_state.get(LEARNING_LOCKED, False),
                     )
 
@@ -371,6 +411,46 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             _LOGGER.error(f"Failed to load EV settings: {e}")
 
         self._data_loaded = True
+
+    def _migrate_learning_state(self, learning_data: dict, stored_model: int):
+        """Discard learned values fitted by an older estimator.
+
+        The learned loss is only meaningful relative to the estimator that
+        produced the error signal. Carrying it across a change to that
+        estimator would keep a number that was never measuring what its name
+        claims, and — worse — a stored `locked` flag would stop the corrected
+        loop from ever re-deriving it.
+        """
+        configured_loss = self.learning_state[LEARNING_CHARGER_LOSS]
+        preserved = learning_data.get(LEARNING_PRICE_ARRIVAL, [])
+
+        _LOGGER.warning(
+            "Efficiency learning state was fitted by model v%d (current v%d) and "
+            "has been reset: loss %.1f%% / confidence %s / sessions %s discarded, "
+            "restarting from the configured %.1f%%. Price-arrival history kept.",
+            stored_model,
+            CURRENT_LEARNING_MODEL,
+            learning_data.get(LEARNING_CHARGER_LOSS, 0.0),
+            learning_data.get(LEARNING_CONFIDENCE, 0),
+            learning_data.get(LEARNING_SESSIONS, 0),
+            configured_loss,
+        )
+
+        self.learning_state.update({
+            LEARNING_CHARGER_LOSS: configured_loss,
+            LEARNING_CONFIDENCE: 0,
+            LEARNING_SESSIONS: 0,
+            LEARNING_MEASUREMENTS: 0,
+            LEARNING_LOCKED: False,
+            LEARNING_HISTORY: [],
+            LEARNING_LAST_REFRESH: None,
+            LEARNING_PRICE_ARRIVAL: preserved,
+            LEARNING_MODEL_VERSION: CURRENT_LEARNING_MODEL,
+        })
+        self._add_log(
+            "Efficiency learning reset: stored values came from an older "
+            f"estimator. Restarting from {configured_loss:.1f}% loss."
+        )
 
     def _save_data(self):
         """Schedule save of settings to disk."""
@@ -504,7 +584,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         
         # Extract key fields that define a unique plan
         signature_data = {
-            "departure_time": plan.get("departure_time", ""),
+            "departure_time": plan.get("plan_departure_time", ""),
             "planned_target_soc": plan.get("planned_target_soc", 0),
             "charging_summary": plan.get("charging_summary", ""),
             "should_charge_now": plan.get("should_charge_now", False),
@@ -614,13 +694,17 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             self._check_car_limit_drift()
             trust_sensor_period = self._update_virtual_soc(data)
             data["car_soc"] = self._virtual_soc
+            data["virtual_soc"] = self._virtual_soc
+            data["reported_soc"] = self._last_sensor_soc
             data["soc_sensor_refresh"] = trust_sensor_period
 
             # Delegate Logic to Planner
             data["max_available_current"] = calculate_load_balancing(
                 data, self.config_settings["max_fuse"]
             )
-            data["current_price_status"] = analyze_prices(data["price_data"])
+            data["current_price_status"] = analyze_prices(
+                data["price_data"].get("today", [])
+            )
 
             # Get expected price arrival time from learning
             expected_price_time = self._get_expected_price_arrival_time()
@@ -905,9 +989,13 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
     async def _trigger_car_refresh(self, service: str, entity_id: str, trigger_learning: bool = False):
         try:
-            # Store virtual SoC BEFORE refresh to compare with actual after (if learning)
+            # Record the estimate at every refresh, not only the learning ones.
+            # _update_virtual_soc compares the incoming reading against this to
+            # decide whether the refresh actually produced a new value, and a
+            # baseline left over from some earlier refresh made that verdict
+            # arbitrary.
+            self._soc_before_refresh = self._virtual_soc
             if trigger_learning:
-                self._soc_before_refresh = self._virtual_soc
                 self._add_log(f"Forcing Car Refresh for Learning (Virtual SoC: {self._virtual_soc:.1f}%)")
             else:
                 self._add_log(f"Forcing Car Refresh (Virtual SoC: {self._virtual_soc:.1f}%)")
@@ -925,140 +1013,171 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             self._last_car_refresh_time = refresh_time
             self._refresh_trigger_timestamp = refresh_time
             
-            # Only schedule learning evaluation if this is a learning refresh
+            # A forced refresh no longer schedules its own evaluation. Its job
+            # is to produce a fresh reading; the measurement is taken when that
+            # reading lands, in _update_virtual_soc, where the interval it
+            # covers is actually known.
             if trigger_learning:
                 interval_mode = self.conf_keys.get("refresh_int", REFRESH_NEVER)
                 if interval_mode == REFRESH_AT_TARGET and self.session_manager.current_session:
                     self.learning_state[LEARNING_LAST_REFRESH] = refresh_time.isoformat()
-                    # Schedule evaluation after a delay to allow SoC to update
-                    self.hass.async_create_task(self._evaluate_efficiency_after_delay(refresh_time))
         except Exception as e:
             _LOGGER.error(f"Failed to force refresh car: {e}")
 
-    async def _evaluate_efficiency_after_delay(self, refresh_time: datetime):
-        """Wait for SoC to update, then evaluate efficiency learning."""
-        # Wait 30 seconds for car SoC to update after refresh
-        await asyncio.sleep(30)
-        await self._evaluate_efficiency_learning(refresh_time)
+    def _reset_learning_window(self):
+        """Drop the open measurement window without taking a measurement."""
+        self._anchor_sensor_soc = None
+        self._anchor_time = None
+        self._anchor_loss_used = None
+        self._anchor_suspect = False
 
-    async def _evaluate_efficiency_learning(self, refresh_time: datetime):
-        """Evaluate and adjust learned efficiency after a measurement point."""
-        
-        # Get actual SoC after refresh
-        state = self.hass.states.get(self.conf_keys["car_soc"])
-        actual_soc = (
-            float(state.state)
-            if state and state.state not in [STATE_UNAVAILABLE, STATE_UNKNOWN]
-            else 0.0
+    def _open_learning_window(self, sensor_soc: float, when: datetime):
+        """Anchor a new measurement window at a real sensor reading."""
+        self._anchor_sensor_soc = sensor_soc
+        self._anchor_time = when
+        self._anchor_loss_used, _ = get_effective_charger_loss(
+            self.config_settings, self.learning_state
         )
-        
-        if actual_soc == 0:
-            _LOGGER.debug("📊 Skipping learning evaluation: SoC sensor unavailable")
+        self._anchor_suspect = False
+
+    def _close_learning_window(self, sensor_soc: float, when: datetime):
+        """Compare the model's prediction against the car's own answer.
+
+        Both ends of the window are real reported readings, so the car's
+        reporting lag cancels out and no assumption about when the reading was
+        taken is needed. `self._virtual_soc` still holds the prediction for
+        this instant — the caller snaps it to the sensor immediately after.
+        """
+        if self._anchor_sensor_soc is None or self._anchor_loss_used is None:
             return
-        
-        # Get the virtual SoC we had BEFORE the refresh
-        expected_soc = self._soc_before_refresh
-        if expected_soc is None or expected_soc == 0:
-            _LOGGER.debug("📊 Skipping learning evaluation: No virtual SoC recorded before refresh")
+
+        predicted_gain = self._virtual_soc - self._anchor_sensor_soc
+        observed_gain = sensor_soc - self._anchor_sensor_soc
+
+        if self._anchor_suspect:
+            _LOGGER.debug(
+                "📊 Discarding measurement window: it contains unmeasured or "
+                "clamped charge (predicted %.1f%%, observed %.1f%%)",
+                predicted_gain, observed_gain,
+            )
             return
-        
-        # Calculate error: positive = actual higher than expected (less loss), negative = lower (more loss)
-        soc_error = actual_soc - expected_soc
-        
-        _LOGGER.info(
-            "📊 Efficiency measurement: virtual SoC was %.1f%%, actual SoC is %.1f%%, error %.1f%%",
-            expected_soc, actual_soc, soc_error
+
+        if predicted_gain < MIN_LEARNING_WINDOW_SOC:
+            _LOGGER.debug(
+                "📊 Skipping measurement: window too small (%.1f%% predicted, "
+                "need %.1f%%)", predicted_gain, MIN_LEARNING_WINDOW_SOC,
+            )
+            return
+
+        if observed_gain < 0:
+            # The car was driven, or the BMS recalibrated downward. Either way
+            # this window did not measure charging.
+            _LOGGER.debug(
+                "📊 Skipping measurement: SoC fell %.1f%% during the window",
+                observed_gain,
+            )
+            return
+
+        self._apply_efficiency_measurement(
+            predicted_gain=predicted_gain,
+            observed_gain=observed_gain,
+            loss_used=self._anchor_loss_used,
+            when=when,
         )
-        
-        # Get session for logging
-        sessions = self.learning_state.get(LEARNING_SESSIONS, 0)
+
+    def _apply_efficiency_measurement(
+        self,
+        predicted_gain: float,
+        observed_gain: float,
+        loss_used: float,
+        when: datetime,
+    ):
+        """Fold one measurement into the learned loss.
+
+        The estimator adds `raw_gain * (1 - loss/100)` per cycle, so over a
+        window `predicted = raw * (1 - loss_used/100)` while the truth is
+        `observed = raw * (1 - loss_true/100)`. Eliminating the unobservable
+        raw gain gives a closed-form estimate of the real loss:
+
+            loss_true = 100 * (1 - (observed / predicted) * (1 - loss_used/100))
+
+        That single-shot estimate is noisy, so it is blended into the running
+        value with a step that shrinks as confidence grows, rather than nudged
+        by a fixed ladder.
+        """
+        efficiency_used = 1.0 - (loss_used / 100.0)
+        implied_loss = 100.0 * (1.0 - (observed_gain / predicted_gain) * efficiency_used)
+        implied_loss = max(MIN_LEARNED_LOSS, min(MAX_LEARNED_LOSS, implied_loss))
+
+        measurements = self.learning_state.get(LEARNING_MEASUREMENTS, 0)
         confidence = self.learning_state.get(LEARNING_CONFIDENCE, 0)
-        current_loss = self.learning_state.get(LEARNING_CHARGER_LOSS, 0.0)
-        
-        # Margin of error (tighter as we learn)
+        current_loss = self.learning_state.get(LEARNING_CHARGER_LOSS, loss_used)
+
+        residual = implied_loss - current_loss
+
+        # Move fast while the estimate is still unformed, slowly once it is.
+        alpha = 0.5 if measurements < 5 else (0.3 if confidence < 6 else 0.15)
+        new_loss = current_loss + alpha * residual
+        new_loss = max(MIN_LEARNED_LOSS, min(MAX_LEARNED_LOSS, new_loss))
+
+        # Margin tightens as the estimate settles.
         if confidence < 3:
-            margin = 3.0  # Allow 3% error initially
+            margin = 3.0
         elif confidence < 6:
             margin = 2.0
         else:
             margin = 1.0
-        
-        adjustment = 0.0
-        reason = ""
-        
-        if abs(soc_error) <= margin:
-            # Within acceptable range
+
+        if abs(residual) <= margin:
             confidence += 1
-            sessions += 1
             reason = f"Within {margin:.1f}% margin, confidence increased"
-        elif soc_error < -margin:
-            # Actual LOWER than expected - we're losing more energy than thought
-            # Need to INCREASE loss percentage
-            if sessions < 5:
-                adjustment = min(3.0, abs(soc_error) * 0.5)  # Aggressive early
-            else:
-                adjustment = min(1.5, abs(soc_error) * 0.3)  # More conservative
-            
-            current_loss += adjustment
+        elif residual > 0:
             confidence = max(0, confidence - 1)
-            sessions += 1
-            reason = f"Underperforming by {abs(soc_error):.1f}%, increasing loss"
-            
-        elif soc_error > margin:
-            # Actual HIGHER than expected - we're losing less than thought
-            # Need to DECREASE loss percentage (careful!)
-            if sessions < 5:
-                adjustment = -min(2.0, soc_error * 0.4)
-            else:
-                adjustment = -min(1.0, soc_error * 0.25)
-            
-            current_loss += adjustment
+            reason = f"Under-delivering: implied loss {implied_loss:.1f}%, raising estimate"
+        else:
             confidence = max(0, confidence - 1)
-            sessions += 1
-            reason = f"Outperforming by {soc_error:.1f}%, decreasing loss"
-        
-        # Apply bounds
-        current_loss = max(0.0, min(20.0, current_loss))
-        
-        # Lock if high confidence
+            reason = f"Over-delivering: implied loss {implied_loss:.1f}%, lowering estimate"
+
+        confidence = min(10, confidence)
+        measurements += 1
         locked = confidence >= 8
         if locked and not self.learning_state.get(LEARNING_LOCKED, False):
             reason += " - LOCKED IN"
-        
-        # Update state
+
         self.learning_state.update({
-            LEARNING_CHARGER_LOSS: current_loss,
-            LEARNING_CONFIDENCE: min(10, confidence),
-            LEARNING_SESSIONS: sessions,
+            LEARNING_CHARGER_LOSS: new_loss,
+            LEARNING_CONFIDENCE: confidence,
+            LEARNING_MEASUREMENTS: measurements,
             LEARNING_LOCKED: locked,
+            LEARNING_MODEL_VERSION: CURRENT_LEARNING_MODEL,
         })
-        
-        # Add to history
+
         history = self.learning_state.get(LEARNING_HISTORY, [])
         history.append({
-            "timestamp": refresh_time.isoformat(),
-            "expected_soc": round(expected_soc, 1),
-            "actual_soc": round(actual_soc, 1),
-            "error": round(soc_error, 1),
-            "adjustment": round(adjustment, 1),
-            "new_loss_pct": round(current_loss, 1),
+            "timestamp": when.isoformat(),
+            "predicted_gain": round(predicted_gain, 2),
+            "observed_gain": round(observed_gain, 2),
+            "loss_used_pct": round(loss_used, 1),
+            "implied_loss_pct": round(implied_loss, 1),
+            "new_loss_pct": round(new_loss, 1),
             "confidence": confidence,
         })
-        self.learning_state[LEARNING_HISTORY] = history[-10:]  # Keep last 10
-        
-        # LOG TO ACTION LOG
+        self.learning_state[LEARNING_HISTORY] = history[-10:]
+
         self._add_log(
             f"Efficiency Learning: {reason}. "
-            f"Loss now {current_loss:.1f}% (confidence {confidence}/10). "
-            f"Expected {expected_soc:.1f}%, got {actual_soc:.1f}%"
+            f"Loss now {new_loss:.1f}% (confidence {confidence}/10). "
+            f"Predicted +{predicted_gain:.1f}%, measured +{observed_gain:.1f}%"
         )
-        
+
         _LOGGER.info(
-            "🎓 Learning result: loss=%.1f%%, confidence=%d/10, sessions=%d, locked=%s - %s",
-            current_loss, confidence, sessions, locked, reason
+            "🎓 Learning: predicted +%.2f%% vs measured +%.2f%% over the window "
+            "(ran at %.1f%% loss) → implied %.1f%%, blended to %.1f%% "
+            "(confidence %d/10, measurements %d, locked=%s) - %s",
+            predicted_gain, observed_gain, loss_used, implied_loss,
+            new_loss, confidence, measurements, locked, reason,
         )
-        
-        # Save state
+
         self._save_data()
 
     def _update_locked_plan_status(self, locked_plan: dict) -> dict:
@@ -1099,6 +1218,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             # any earlier mismatch, otherwise the stale flag suppresses the
             # next real one (this check only logs on transitions).
             self._car_limit_drift_logged = False
+            self.car_limit_drift_active = False
             return
 
         # The car only reports its limit when it next phones home. Measured
@@ -1117,6 +1237,8 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             return
 
         drifted = abs(actual - self._last_applied_car_limit) > 0.5
+        self.car_limit_reported = actual
+        self.car_limit_drift_active = drifted
         if drifted == self._car_limit_drift_logged:
             return  # only log the transitions, not every cycle
         self._car_limit_drift_logged = drifted
@@ -1182,21 +1304,27 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             # This prevents wobbling from re-reading the same stale sensor value
             if actively_charging:
                 if trust_sensor_period or sensor_value_changed or self._virtual_soc == 0.0:
+                    # A fresh reading closes the current measurement window: the
+                    # model's prediction and the car's own answer now describe
+                    # the same interval, so this is the one moment where the two
+                    # can be compared without guessing at the reporting lag.
+                    if sensor_value_changed:
+                        self._close_learning_window(sensor_soc_f, current_time)
                     self._virtual_soc = sensor_soc_f
+                    self._open_learning_window(sensor_soc_f, current_time)
                     _LOGGER.debug(
                         f"Virtual SoC updated to {sensor_soc_f:.1f}% while plugged in "
                         f"(forced_refresh={trust_sensor_period}, value_changed={sensor_value_changed})"
                     )
                 # else: ignore unchanged sensor value while plugged in; rely purely on virtual estimator
             else:
-                # When not charging: always trust sensor (could be driven, charged elsewhere, etc.)
-                # Follow sensor upwards, downwards, or on first reading
-                if sensor_soc_f > self._virtual_soc or self._virtual_soc == 0.0:
-                    self._virtual_soc = sensor_soc_f
-                else:
-                    # Sensor reports lower value while not charging - trust it (vehicle may have been driven)
-                    self._virtual_soc = sensor_soc_f
-            
+                # When not charging the sensor is always the better source: the
+                # car may have been driven or charged elsewhere. Follow it in
+                # both directions, and start a fresh window — energy that did
+                # not come through this charger tells us nothing about it.
+                self._virtual_soc = sensor_soc_f
+                self._open_learning_window(sensor_soc_f, current_time)
+
             # Update last sensor value for next comparison
             self._last_sensor_soc = sensor_soc_f
 
@@ -1217,7 +1345,11 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             if measured_amps > 0.5:
                 self._amps_fallback_since = None
                 self._amps_fallback_logged = False
+                self.charge_estimate_drift_active = False
             elif self._last_applied_amps > 0:
+                # Energy we believe flowed but did not measure must not teach
+                # the model anything.
+                self._anchor_suspect = True
                 if self._amps_fallback_since is None:
                     self._amps_fallback_since = current_time
                 elif (
@@ -1225,6 +1357,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                     and current_time - self._amps_fallback_since > timedelta(minutes=5)
                 ):
                     self._amps_fallback_logged = True
+                    self.charge_estimate_drift_active = True
                     _LOGGER.error(
                         "Charger has measured <0.5A for over 5 minutes while %sA "
                         "was commanded; the virtual SoC is still being advanced "
@@ -1237,18 +1370,29 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 seconds_passed = (current_time - self._last_update_time).total_seconds()
                 hours_passed = seconds_passed / 3600.0
                 estimated_power_kw = (3 * 230 * used_amps) / 1000.0
-                efficiency_pct = self.entry.data.get(CONF_CHARGER_LOSS, 10.0)
+                # The estimator and the planner must run on the same efficiency
+                # figure. They used to disagree — this read the raw value from
+                # entry.data, ignoring both the options flow and everything
+                # learning had derived — which left the learning loop adjusting
+                # a number that never fed the quantity it was measuring.
+                efficiency_pct, _ = get_effective_charger_loss(
+                    self.config_settings, self.learning_state
+                )
                 efficiency_factor = 1.0 - (efficiency_pct / 100.0)
                 added_kwh = estimated_power_kw * hours_passed * efficiency_factor
 
                 if self.car_capacity > 0:
                     added_percent = (added_kwh / self.car_capacity) * 100.0
                     self._virtual_soc += added_percent
+                    # A clamp truncates the prediction, so the window would look
+                    # like an over-prediction that never happened.
                     if self._last_applied_car_limit > 0:
                         if self._virtual_soc > self._last_applied_car_limit:
                             self._virtual_soc = float(self._last_applied_car_limit)
+                            self._anchor_suspect = True
                     if self._virtual_soc > 100.0:
                         self._virtual_soc = 100.0
+                        self._anchor_suspect = True
 
         self._last_update_time = current_time
         return trust_sensor_period
@@ -1543,7 +1687,11 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             # Clear locked plan for new session
             self._locked_plan = None
             self._locked_plan_soc = None
-            
+
+            # Start a fresh measurement window; whatever happened to the pack
+            # while it was away from this charger tells us nothing about it.
+            self._reset_learning_window()
+
             # Reset overload prevention timer for new session
             self._last_overload_check_time = None
             
@@ -1577,7 +1725,9 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             # Clear locked plan when car unplugs
             self._locked_plan = None
             self._locked_plan_soc = None
-            
+
+            self._reset_learning_window()
+
             # Reset overload prevention timer
             self._last_overload_check_time = None
 
@@ -1618,7 +1768,11 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
     def _finalize_session(self, final_soc=None):
         report = self.session_manager.stop_session(self.user_settings, self.currency, final_soc=final_soc)
         
-        # Increment learning session counter
+        # The single place a completed session is counted. The efficiency
+        # evaluator used to increment this too, so one plug-in could add two or
+        # more, which ran the count past the 10-session threshold — and dropped
+        # the learning-phase safety buffer — after a handful of real sessions.
+        # Measurements are counted separately, as LEARNING_MEASUREMENTS.
         interval_mode = self.conf_keys.get("refresh_int", REFRESH_NEVER)
         if interval_mode == REFRESH_AT_TARGET and report:
             sessions = self.learning_state.get(LEARNING_SESSIONS, 0) + 1
@@ -1719,6 +1873,8 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 "learned_loss_pct": self.learning_state.get(LEARNING_CHARGER_LOSS, 0.0),
                 "confidence": self.learning_state.get(LEARNING_CONFIDENCE, 0),
                 "sessions_completed": self.learning_state.get(LEARNING_SESSIONS, 0),
+                "measurements_taken": self.learning_state.get(LEARNING_MEASUREMENTS, 0),
+                "model_version": self.learning_state.get(LEARNING_MODEL_VERSION),
                 "locked": self.learning_state.get(LEARNING_LOCKED, False),
                 "configured_loss_pct": float(self.entry.options.get(CONF_CHARGER_LOSS, self.entry.data.get(CONF_CHARGER_LOSS, DEFAULT_LOSS))),
                 "last_refresh": self.learning_state.get(LEARNING_LAST_REFRESH),
@@ -1731,7 +1887,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 "should_charge_now": data.get("should_charge_now", False),
                 "planned_target_soc": data.get("planned_target_soc"),
                 "scheduled_start": data.get("scheduled_start"),
-                "departure_time": data.get("departure_time"),
+                "departure_time": data.get("plan_departure_time"),
                 "charging_summary": data.get("charging_summary", ""),
             },
             
@@ -1992,6 +2148,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         learned_loss = self.learning_state.get(LEARNING_CHARGER_LOSS, configured_loss)
         confidence = self.learning_state.get(LEARNING_CONFIDENCE, 0)
         sessions = self.learning_state.get(LEARNING_SESSIONS, 0)
+        measurements = self.learning_state.get(LEARNING_MEASUREMENTS, 0)
         locked = self.learning_state.get(LEARNING_LOCKED, False)
         history = self.learning_state.get(LEARNING_HISTORY, [])
         
@@ -2021,22 +2178,33 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         lines.append("")
         
         # Learning progress
-        if sessions > 0:
+        if sessions > 0 or measurements > 0:
             lines.append("Learning Progress:")
             lines.append(f"  • Sessions completed: {sessions}")
+            lines.append(f"  • Measurements taken: {measurements}")
             lines.append(f"  • Confidence level: {confidence}/10")
-            lines.append(f"  • Measurements taken: {len(history)}")
-            
+
             if history:
-                lines.append(f"  • Last measurement: {history[-1].get('timestamp', 'unknown')}")
-                last_error = history[-1].get('error', 0)
-                lines.append(f"  • Last SoC error: {last_error:+.2f}% ({'overperforming' if last_error > 0 else 'underperforming'})")
-            
+                last = history[-1]
+                lines.append(f"  • Last measurement: {last.get('timestamp', 'unknown')}")
+                predicted = last.get("predicted_gain")
+                observed = last.get("observed_gain")
+                if predicted is not None and observed is not None:
+                    lines.append(
+                        f"  • Last window: predicted +{predicted:.1f}%, "
+                        f"measured +{observed:.1f}% "
+                        f"(implied loss {last.get('implied_loss_pct', 0):.1f}%)"
+                    )
+
             lines.append("")
             lines.append("How it works:")
-            lines.append("  • The system measures actual vs expected SoC during charging")
-            lines.append("  • Adjusts loss percentage up (if underperforming) or down (if overperforming)")
-            lines.append("  • Confidence increases when measurements are within tolerance")
+            lines.append("  • Each measurement runs between two SoC readings the car actually reported,")
+            lines.append("    so the car's reporting delay cancels out instead of skewing the result")
+            lines.append("  • The predicted gain over that window is compared with the measured gain,")
+            lines.append("    which gives a direct estimate of the real loss")
+            lines.append("  • That estimate is blended into the running value, in smaller steps as")
+            lines.append("    confidence grows; confidence rises while measurements agree")
+            lines.append("  • Windows containing unmeasured or clamped charge are discarded")
             lines.append("  • Locks at confidence 8/10 for stable long-term use")
-        
+
         return "\n".join(lines)

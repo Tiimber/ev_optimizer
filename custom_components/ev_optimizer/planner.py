@@ -21,6 +21,7 @@ from .const import (
     LEARNING_CHARGER_LOSS,
     LEARNING_CONFIDENCE,
     LEARNING_SESSIONS,
+    LEARNING_MEASUREMENTS,
     LEARNING_LOCKED,
     DEFAULT_LOSS,
 )
@@ -36,25 +37,29 @@ def get_effective_charger_loss(config_settings: dict, learning_state: dict) -> t
     """
     configured_loss = config_settings.get("charger_loss", DEFAULT_LOSS)
     sessions = learning_state.get(LEARNING_SESSIONS, 0)
-    
-    if sessions > 0:
-        # Use learned value if we have learning data
+    measurements = learning_state.get(LEARNING_MEASUREMENTS, 0)
+
+    # The learned value is only meaningful once something has actually been
+    # measured. Completed sessions do not imply a measurement — a session can
+    # end without ever producing a usable window — so this gates on the
+    # measurement count, not the session count.
+    if measurements > 0:
         effective_loss = learning_state.get(LEARNING_CHARGER_LOSS, configured_loss)
     else:
-        # Use configured on first run
         effective_loss = configured_loss
-    
+
     # Check if in learning phase
     locked = learning_state.get(LEARNING_LOCKED, False)
     is_learning = (sessions < 10 and not locked)
-    
+
     confidence = learning_state.get(LEARNING_CONFIDENCE, 0)
     _LOGGER.debug(
-        "🔧 Charger efficiency: %.1f%% loss (sessions=%d, confidence=%d/10, %s)",
-        effective_loss, sessions, confidence,
+        "🔧 Charger efficiency: %.1f%% loss (sessions=%d, measurements=%d, "
+        "confidence=%d/10, %s)",
+        effective_loss, sessions, measurements, confidence,
         "Learning" if is_learning else "Locked"
     )
-    
+
     return effective_loss, is_learning
 
 
@@ -96,11 +101,29 @@ def calculate_load_balancing(data: dict, max_fuse: float) -> float:
     return max(0.0, available)
 
 
-def analyze_prices(raw_prices: list) -> str:
-    """Quick status for UI."""
+def analyze_prices(raw_prices) -> str:
+    """Quick status for UI.
+
+    Accepts the day's price list. A mapping is rejected outright rather than
+    silently producing "Unknown": the caller used to hand over the whole price
+    sensor attribute dict, and the resulting KeyError was swallowed by the
+    except below, so the sensor read "Unknown" permanently.
+    """
+    if isinstance(raw_prices, dict):
+        _LOGGER.error(
+            "analyze_prices expects the price list, got a mapping with keys %s",
+            sorted(raw_prices)[:8],
+        )
+        return "Unknown"
+    if isinstance(raw_prices, str):
+        try:
+            raw_prices = [float(x) for x in raw_prices.split(",") if x.strip()]
+        except ValueError:
+            return "Unknown"
     if not raw_prices:
         return "No Data"
     try:
+        raw_prices = [float(p) for p in raw_prices]
         count = len(raw_prices)
         now_dt = datetime.now()
         idx = (now_dt.hour * 4) + (now_dt.minute // 15) if count > 25 else now_dt.hour
@@ -294,7 +317,12 @@ def generate_charging_plan(
         return plan
 
     dept_dt = get_departure_time(data, now, data.get("calendar_events"))
-    plan["departure_time"] = dept_dt.isoformat()
+    # Deliberately NOT "departure_time": the coordinator merges this plan into
+    # the same dict that carries the user's settings, where "departure_time" is
+    # the configured time-of-day. Reusing the name overwrote the setting with an
+    # ISO datetime, which is why the Standard Departure Time entity always read
+    # back 07:00 no matter what was stored.
+    plan["plan_departure_time"] = dept_dt.isoformat()
     calc_window = [p for p in prices if p["start"] < dept_dt]
     
     _LOGGER.debug("🕐 Departure time: %s (from %s)",

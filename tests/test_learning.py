@@ -28,6 +28,7 @@ def test_get_effective_charger_loss_initial():
     from custom_components.ev_optimizer.const import (
         LEARNING_CHARGER_LOSS,
         LEARNING_SESSIONS,
+        LEARNING_MEASUREMENTS,
         LEARNING_CONFIDENCE,
         LEARNING_LOCKED,
     )
@@ -52,6 +53,7 @@ def test_get_effective_charger_loss_uses_learned():
     from custom_components.ev_optimizer.const import (
         LEARNING_CHARGER_LOSS,
         LEARNING_SESSIONS,
+        LEARNING_MEASUREMENTS,
         LEARNING_CONFIDENCE,
         LEARNING_LOCKED,
     )
@@ -60,6 +62,7 @@ def test_get_effective_charger_loss_uses_learned():
     learning_state = {
         LEARNING_CHARGER_LOSS: 7.5,
         LEARNING_SESSIONS: 3,
+        LEARNING_MEASUREMENTS: 3,
         LEARNING_CONFIDENCE: 4,
         LEARNING_LOCKED: False,
     }
@@ -76,6 +79,7 @@ def test_get_effective_charger_loss_locked():
     from custom_components.ev_optimizer.const import (
         LEARNING_CHARGER_LOSS,
         LEARNING_SESSIONS,
+        LEARNING_MEASUREMENTS,
         LEARNING_CONFIDENCE,
         LEARNING_LOCKED,
     )
@@ -84,6 +88,7 @@ def test_get_effective_charger_loss_locked():
     learning_state = {
         LEARNING_CHARGER_LOSS: 8.2,
         LEARNING_SESSIONS: 7,
+        LEARNING_MEASUREMENTS: 7,
         LEARNING_CONFIDENCE: 8,
         LEARNING_LOCKED: True,
     }
@@ -100,6 +105,7 @@ def test_get_effective_charger_loss_after_10_sessions():
     from custom_components.ev_optimizer.const import (
         LEARNING_CHARGER_LOSS,
         LEARNING_SESSIONS,
+        LEARNING_MEASUREMENTS,
         LEARNING_CONFIDENCE,
         LEARNING_LOCKED,
     )
@@ -108,6 +114,7 @@ def test_get_effective_charger_loss_after_10_sessions():
     learning_state = {
         LEARNING_CHARGER_LOSS: 8.0,
         LEARNING_SESSIONS: 10,
+        LEARNING_MEASUREMENTS: 10,
         LEARNING_CONFIDENCE: 7,
         LEARNING_LOCKED: False,
     }
@@ -124,6 +131,7 @@ def test_learning_buffer_added_during_learning():
     from custom_components.ev_optimizer.const import (
         LEARNING_CHARGER_LOSS,
         LEARNING_SESSIONS,
+        LEARNING_MEASUREMENTS,
         LEARNING_CONFIDENCE,
         LEARNING_LOCKED,
     )

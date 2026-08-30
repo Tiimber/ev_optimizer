@@ -383,7 +383,7 @@ def generate_plan_image(data: dict, file_path: str):
         return
     
     # Filter schedule to only show up to departure time
-    departure_time_str = data.get("departure_time")
+    departure_time_str = data.get("plan_departure_time")
     if departure_time_str:
         departure_dt = datetime.fromisoformat(departure_time_str)
         schedule = [s for s in schedule if datetime.fromisoformat(s["start"]) <= departure_dt]
