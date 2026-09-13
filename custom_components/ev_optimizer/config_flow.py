@@ -312,8 +312,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # actually flowed rather than what was commanded.
                 vol.Optional(
                     CONF_CHARGER_ENERGY_SENSOR,
-    CONF_CONTIGUOUS_CHARGING,
-    CONF_PREFER_LATE_SLOTS,
                     default=defaults.get(CONF_CHARGER_ENERGY_SENSOR),
                 ): EntitySelector(
                     EntitySelectorConfig(domain="sensor", device_class="energy")

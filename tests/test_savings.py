@@ -129,3 +129,90 @@ def test_departure_source_names_the_override(pkg_loader):
 
     plan = _plan(planner, const, [2.0] * 24)
     assert plan["departure_source"] == "standard departure time"
+
+
+def test_session_savings_hold_while_the_session_delivers(pkg_loader):
+    """Delivery shrinks the remaining job; it must not shrink the headline.
+
+    Each tick the planner costs only the energy still to be pulled, so its
+    estimate falls towards zero over the session. Latching keeps the sensor
+    answering "what did waiting save me" rather than "what is left to save".
+    """
+    coordinator = pkg_loader("coordinator")
+    track = coordinator.EVSmartChargerCoordinator._track_session_savings
+    reset = coordinator.EVSmartChargerCoordinator._reset_session_savings
+
+    class Stub:
+        session_savings = None
+        session_savings_planned = None
+        session_savings_baseline = None
+        _session_savings_kwh = 0.0
+
+    c = Stub()
+
+    # Plug-in: the whole job is planned.
+    track(c, {"estimated_savings": 18.0, "planned_cost": 30.0,
+              "baseline_cost": 48.0, "planned_grid_kwh": 20.0})
+    assert c.session_savings == 18.0
+
+    # Halfway through, only half the energy is left to plan for.
+    track(c, {"estimated_savings": 9.0, "planned_cost": 15.0,
+              "baseline_cost": 24.0, "planned_grid_kwh": 10.0})
+    assert c.session_savings == 18.0
+    assert c.session_savings_planned == 30.0
+
+    # Finished: nothing left to pull, so nothing left to save.
+    track(c, {"estimated_savings": 0.0, "planned_cost": 0.0,
+              "baseline_cost": 0.0, "planned_grid_kwh": 0.0})
+    assert c.session_savings == 18.0
+
+    # A genuinely bigger job — target raised, or the car reported lower than the
+    # estimator assumed — is a new answer, not delivery.
+    track(c, {"estimated_savings": 25.0, "planned_cost": 40.0,
+              "baseline_cost": 65.0, "planned_grid_kwh": 28.0})
+    assert c.session_savings == 25.0
+
+    # Unplugging clears it for the next session.
+    reset(c)
+    assert c.session_savings is None
+    assert c._session_savings_kwh == 0.0
+
+
+def test_session_savings_ignore_ticks_with_no_plan(pkg_loader):
+    """Maintenance mode and no-price ticks publish no cost figures at all."""
+    coordinator = pkg_loader("coordinator")
+    track = coordinator.EVSmartChargerCoordinator._track_session_savings
+
+    class Stub:
+        session_savings = None
+        session_savings_planned = None
+        session_savings_baseline = None
+        _session_savings_kwh = 0.0
+
+    c = Stub()
+    track(c, {"charging_summary": "Target reached. Maintenance mode active."})
+    assert c.session_savings is None
+
+    track(c, {"estimated_savings": 4.0, "planned_cost": 6.0,
+              "baseline_cost": 10.0, "planned_grid_kwh": 5.0})
+    assert c.session_savings == 4.0
+
+    # A later tick with no plan must not wipe the latched figure either.
+    track(c, {})
+    assert c.session_savings == 4.0
+
+
+def test_plan_publishes_the_energy_its_costs_were_computed_over(pkg_loader):
+    """Without it, a shrinking cost is indistinguishable from a shrinking plan."""
+    planner = pkg_loader("planner")
+    const = pkg_loader("const")
+
+    prices = [9.0] * 24
+    for hour in (2, 3, 4, 5):
+        prices[hour] = 1.0
+
+    plan = _plan(planner, const, prices)
+
+    assert plan["planned_grid_kwh"] > 0
+    # 40% -> 80% of 64 kWh, grossed up by the 10% charger loss in _plan's config
+    assert plan["planned_grid_kwh"] == pytest.approx(25.6 / 0.9, abs=0.05)

@@ -145,7 +145,13 @@ LEARNING_MODEL_VERSION = "learning_model_version"
 #   1 -> 2: the virtual SoC estimator used the loss from entry.data while the
 #           planner used the learned value, so the loop adjusted a figure that
 #           did not feed the quantity it measured and could never converge.
-CURRENT_LEARNING_MODEL = 2
+#   2 -> 3: an installation can move up the measurement chain — from commanded
+#           current, or from per-phase current sensors, to a real kWh meter.
+#           Everything learned before that (the charger loss, and the observed
+#           charge power the planner sizes sessions on) was fitted against
+#           whatever the old rung reported, so it is not comparable and must be
+#           re-derived rather than carried across.
+CURRENT_LEARNING_MODEL = 3
 
 # Bounds for the learned loss. The figure absorbs every source of model error
 # (charger loss, a mis-configured pack capacity, mains voltage away from 230 V,

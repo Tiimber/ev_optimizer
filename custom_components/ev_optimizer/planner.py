@@ -875,6 +875,12 @@ def generate_charging_plan(
             plan["planned_cost"] = round(total_plan_cost, 2)
             plan["baseline_cost"] = round(baseline_cost, 2)
             plan["estimated_savings"] = round(baseline_cost - total_plan_cost, 2)
+            # The energy all three figures were costed over. Published so a
+            # consumer can tell a shrinking *job* from a shrinking *saving*:
+            # every tick re-plans only the energy still to be pulled, so these
+            # costs fall towards zero as the session delivers, which is not the
+            # same thing as the scheduling having bought less.
+            plan["planned_grid_kwh"] = round(kwh_to_pull, 2)
             plan["currency"] = currency
 
             summary_lines.append(

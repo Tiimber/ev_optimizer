@@ -408,8 +408,16 @@ class EVChargePowerSensor(CoordinatorEntity, SensorEntity):
 class EVSavingsSensor(CoordinatorEntity, SensorEntity):
     """What scheduling saved against simply charging on plug-in.
 
-    The plan's cost was already computed; this puts a number on the alternative
-    so the value of waiting is visible rather than assumed.
+    Reports the figure for the session as a whole, held steady while it runs.
+    The planner re-costs only the energy still to be pulled, so its own number
+    falls towards zero as the session delivers — an honest forecast of what is
+    left, but read as "savings" it looks like the benefit is evaporating at
+    exactly the moment it is being collected. The live remainder is still
+    available as an attribute for anyone who wants it.
+
+    This is savings from *scheduling* — cheap hours instead of whatever hour the
+    cable went in. It is not the saving against running a petrol or diesel car,
+    which is a different comparison entirely.
     """
 
     _attr_has_entity_name = False
@@ -425,15 +433,21 @@ class EVSavingsSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self) -> float | None:
-        data = self.coordinator.data or {}
-        savings = data.get("estimated_savings")
+        savings = self.coordinator.session_savings
+        if savings is None:
+            # Nothing latched yet — before the first plan of a session, and on
+            # a restart mid-session. The live figure is the best answer there.
+            savings = (self.coordinator.data or {}).get("estimated_savings")
         return round(savings, 2) if savings is not None else None
 
     @property
     def extra_state_attributes(self) -> dict:
         data = self.coordinator.data or {}
-        planned = data.get("planned_cost")
-        baseline = data.get("baseline_cost")
+        planned = self.coordinator.session_savings_planned
+        baseline = self.coordinator.session_savings_baseline
+        if planned is None and baseline is None:
+            planned = data.get("planned_cost")
+            baseline = data.get("baseline_cost")
 
         share = None
         if planned is not None and baseline:
@@ -443,6 +457,12 @@ class EVSavingsSensor(CoordinatorEntity, SensorEntity):
             "planned_cost": planned,
             "cost_if_charging_now": baseline,
             "saved_percent": share,
+            # The remaining-energy view the planner produces each tick. Falls
+            # towards zero as the session delivers; that is delivery, not loss.
+            "remaining_savings": data.get("estimated_savings"),
+            "remaining_planned_cost": data.get("planned_cost"),
+            "planned_grid_kwh": data.get("planned_grid_kwh"),
+            "basis": "scheduling vs charging on plug-in",
             "currency": self.coordinator.currency,
         }
 

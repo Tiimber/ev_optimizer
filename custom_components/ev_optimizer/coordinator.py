@@ -233,6 +233,15 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         self._last_energy_reading = None
         self.energy_source = "none"
 
+        # What the scheduling bought for *this* session, held steady while it
+        # runs. The planner re-costs only the energy still to be pulled, so its
+        # own figure decays to zero as the session delivers — true as a forecast
+        # of what is left, useless as the answer to "what did waiting save me".
+        self.session_savings = None
+        self.session_savings_planned = None
+        self.session_savings_baseline = None
+        self._session_savings_kwh = 0.0
+
         # Recorded when a debug dump is written, so the sensor reporting it does
         # not have to stat the filesystem from the event loop on every update
         self._last_debug_dump_path = None
@@ -777,6 +786,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
             data["update_degraded"] = degraded_reason
             data.update(plan)
+            self._track_session_savings(data)
 
             # From here on every step is best-effort. None of them may stop the
             # charger from being commanded — that is the one thing this update
@@ -1276,6 +1286,41 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             return (NOMINAL_VOLTAGE * total_amps) / 1000.0
 
         return None
+
+    def _reset_session_savings(self):
+        """Forget the previous session's figure so the next one starts clean."""
+        self.session_savings = None
+        self.session_savings_planned = None
+        self.session_savings_baseline = None
+        self._session_savings_kwh = 0.0
+
+    def _track_session_savings(self, data: dict):
+        """Hold what the scheduling bought for this session.
+
+        The planner answers a narrower question every tick: for the energy
+        *still* to be pulled, what does the chosen schedule cost against taking
+        slots as they come from now. Once charging starts, that energy shrinks
+        towards zero and so does the saving, which made the sensor read as if
+        the benefit were evaporating while the session was in fact collecting
+        it. So the figure is latched for the size of job the plan describes, and
+        only re-latched when the job actually grows — a raised target, or a
+        fresh plan after the car reported a lower SoC than the estimator
+        assumed. Delivery shrinking the remainder is not a change of plan.
+        """
+        savings = data.get("estimated_savings")
+        if savings is None:
+            return
+
+        kwh = data.get("planned_grid_kwh") or 0.0
+        # A hair of tolerance: re-planning the same job can jitter the figure by
+        # a fraction of a kWh without the job having changed.
+        grew = kwh > self._session_savings_kwh + 0.05
+
+        if self.session_savings is None or grew:
+            self.session_savings = savings
+            self.session_savings_planned = data.get("planned_cost")
+            self.session_savings_baseline = data.get("baseline_cost")
+            self._session_savings_kwh = kwh
 
     def _measure_energy_delta(self, data: dict, hours: float) -> tuple[float, str]:
         """Energy delivered since the previous update, in kWh.
@@ -2050,6 +2095,8 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             # Clear locked plan for new session
             self._locked_plan = None
             self._locked_plan_soc = None
+
+            self._reset_session_savings()
 
             # Start a fresh measurement window; whatever happened to the pack
             # while it was away from this charger tells us nothing about it.
