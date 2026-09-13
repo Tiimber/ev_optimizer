@@ -478,10 +478,33 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         """
         configured_loss = self.learning_state[LEARNING_CHARGER_LOSS]
         preserved = learning_data.get(LEARNING_PRICE_ARRIVAL, [])
-        # Observed charge power is a direct measurement of the hardware, not a
-        # value fitted by the loss estimator, so it carries across unchanged.
-        preserved_power = learning_data.get(LEARNING_CHARGE_POWER)
-        preserved_samples = learning_data.get(LEARNING_POWER_SAMPLES, 0)
+
+        # Observed charge power is a direct measurement of the hardware rather
+        # than a value fitted by the loss estimator, so it normally carries
+        # across a model change untouched.
+        #
+        # Model 3 is the exception, and the reason it exists: it marks a change
+        # in *what was being measured*. An installation can be pointed at the
+        # wrong current sensors — a charger that publishes both its allocated
+        # current and its actual draw makes this easy to get wrong — and the
+        # allocated figure is a ceiling, not a measurement. Averaging it
+        # produces a confident, wrong number (here: exactly 3 x 230 V x 16 A)
+        # that no amount of subsequent good data will pull down quickly, because
+        # it arrives as one sample against thousands. So it has to go with the
+        # rest, and be re-derived from whatever the corrected configuration
+        # actually reads.
+        power_source_changed = stored_model < 3
+        preserved_power = None if power_source_changed else learning_data.get(LEARNING_CHARGE_POWER)
+        preserved_samples = 0 if power_source_changed else learning_data.get(LEARNING_POWER_SAMPLES, 0)
+        if power_source_changed and learning_data.get(LEARNING_CHARGE_POWER):
+            _LOGGER.warning(
+                "Observed charge power (%.2f kW over %d samples) was measured "
+                "through the previous energy-measurement configuration and has "
+                "been discarded; plans fall back to the fuse estimate until it "
+                "is re-derived.",
+                learning_data.get(LEARNING_CHARGE_POWER, 0.0),
+                learning_data.get(LEARNING_POWER_SAMPLES, 0),
+            )
 
         _LOGGER.warning(
             "Efficiency learning state was fitted by model v%d (current v%d) and "

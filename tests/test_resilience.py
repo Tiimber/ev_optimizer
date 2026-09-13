@@ -200,8 +200,13 @@ def test_ignores_implausible_and_idle_power(pkg_loader, hass_mock):
     assert coord.learning_state[const.LEARNING_POWER_SAMPLES] == 0
 
 
-def test_observed_power_survives_a_learning_model_reset(pkg_loader, hass_mock):
-    """It measures the hardware, not the loss estimator, so it carries across."""
+def test_observed_power_survives_a_pure_estimator_change(pkg_loader, hass_mock):
+    """It measures the hardware, not the loss estimator, so it carries across.
+
+    Model 3 onwards: a migration that only changes how the *loss* is fitted
+    leaves the power observation alone, because nothing about how it was
+    measured has changed.
+    """
     const = pkg_loader("const")
     coordinator_mod = pkg_loader("coordinator")
 
@@ -213,12 +218,40 @@ def test_observed_power_survives_a_learning_model_reset(pkg_loader, hass_mock):
             const.LEARNING_CHARGE_POWER: 9.6,
             const.LEARNING_POWER_SAMPLES: 400,
         },
-        stored_model=1,
+        stored_model=3,
     )
 
     assert coord.learning_state[const.LEARNING_CHARGE_POWER] == pytest.approx(9.6)
     assert coord.learning_state[const.LEARNING_POWER_SAMPLES] == 400
     assert coord.learning_state[const.LEARNING_SESSIONS] == 0
+
+
+def test_observed_power_is_discarded_when_the_measurement_source_changed(
+    pkg_loader, hass_mock
+):
+    """Crossing model 3 means the sensors themselves were wrong or replaced.
+
+    A charger that publishes both its *allocated* current and its actual draw
+    makes the two easy to confuse, and the allocated figure is a ceiling rather
+    than a measurement. Averaging it yields a confident, wrong number that
+    thousands of stored samples would defend against the first correct one, so
+    it has to be discarded with everything else.
+    """
+    const = pkg_loader("const")
+    coordinator_mod = pkg_loader("coordinator")
+
+    coord = coordinator_mod.EVSmartChargerCoordinator(hass_mock, _entry(const))
+    coord._migrate_learning_state(
+        {
+            const.LEARNING_CHARGER_LOSS: 0.4,
+            const.LEARNING_CHARGE_POWER: 11.04,
+            const.LEARNING_POWER_SAMPLES: 1986,
+        },
+        stored_model=2,
+    )
+
+    assert not coord.learning_state.get(const.LEARNING_CHARGE_POWER)
+    assert coord.learning_state[const.LEARNING_POWER_SAMPLES] == 0
 
 
 # --- degraded planning -------------------------------------------------------
