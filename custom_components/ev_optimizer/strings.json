@@ -12,13 +12,19 @@
           "zaptec_current_limiter": "Current Limiter",
           "zaptec_switch": "Charging Switch",
           "zaptec_resume_button": "Resume Button",
-          "zaptec_stop_button": "Stop Button"
+          "zaptec_stop_button": "Stop Button",
+          "charger_status_sensor": "Charger Status Sensor",
+          "idle_request_assist": "Answer the car when it asks for power",
+          "idle_assist_max_minutes": "Assist limit"
         },
         "data_description": {
           "zaptec_current_limiter": "The entity that controls the maximum charging current (Amps).",
           "zaptec_switch": "The main On/Off switch for the charger (Recommended). If set, buttons are ignored.",
           "zaptec_resume_button": "Fallback: Entity to START charging if no switch is available.",
-          "zaptec_stop_button": "Fallback: Entity to STOP charging if no switch is available."
+          "zaptec_stop_button": "Fallback: Entity to STOP charging if no switch is available.",
+          "charger_status_sensor": "Optional: the sensor reporting the charger's own session state (e.g. Zaptec's charger mode). Needed for the option below.",
+          "idle_request_assist": "When charging is finished, give the car current for as long as it keeps asking. A plugged-in car asks for a session to precondition its cabin from the grid; refused, it waits instead of using the battery. The car stops at its own charge limit.",
+          "idle_assist_max_minutes": "Most minutes of assist per plugged-in session, so a car that asks repeatedly cannot hold the charger open all night."
         }
       },
       "car": {
@@ -135,13 +141,19 @@
           "zaptec_current_limiter": "Current Limiter",
           "zaptec_switch": "Charging Switch",
           "zaptec_resume_button": "Resume Button",
-          "zaptec_stop_button": "Stop Button"
+          "zaptec_stop_button": "Stop Button",
+          "charger_status_sensor": "Charger Status Sensor",
+          "idle_request_assist": "Answer the car when it asks for power",
+          "idle_assist_max_minutes": "Assist limit"
         },
         "data_description": {
           "zaptec_current_limiter": "The entity that controls the maximum charging current (Amps).",
           "zaptec_switch": "The main On/Off switch for the charger (Recommended). If set, buttons are ignored.",
           "zaptec_resume_button": "Fallback: Entity to START charging if no switch is available.",
-          "zaptec_stop_button": "Fallback: Entity to STOP charging if no switch is available."
+          "zaptec_stop_button": "Fallback: Entity to STOP charging if no switch is available.",
+          "charger_status_sensor": "Optional: the sensor reporting the charger's own session state (e.g. Zaptec's charger mode). Needed for the option below.",
+          "idle_request_assist": "When charging is finished, give the car current for as long as it keeps asking. A plugged-in car asks for a session to precondition its cabin from the grid; refused, it waits instead of using the battery. The car stops at its own charge limit.",
+          "idle_assist_max_minutes": "Most minutes of assist per plugged-in session, so a car that asks repeatedly cannot hold the charger open all night."
         }
       },
       "car": {

@@ -53,6 +53,11 @@ from .const import (
     CONF_CHARGER_CURRENT_L3,
     CONF_CHARGER_POWER_SENSOR,
     CONF_CHARGER_ENERGY_SENSOR,
+    CONF_CHARGER_STATUS_SENSOR,
+    CONF_IDLE_REQUEST_ASSIST,
+    CONF_IDLE_ASSIST_MAX_MINUTES,
+    DEFAULT_IDLE_REQUEST_ASSIST,
+    DEFAULT_IDLE_ASSIST_MAX_MINUTES,
     CONF_CONTIGUOUS_CHARGING,
     CONF_PREFER_LATE_SLOTS,
     REFRESH_NEVER,
@@ -190,6 +195,32 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_ZAPTEC_STOP, default=defaults.get(CONF_ZAPTEC_STOP)
                 ): EntitySelector(
                     EntitySelectorConfig(domain=["button", "switch", "script"])
+                ),
+                vol.Optional(
+                    CONF_CHARGER_STATUS_SENSOR,
+                    default=defaults.get(CONF_CHARGER_STATUS_SENSOR),
+                ): EntitySelector(
+                    EntitySelectorConfig(domain=["sensor", "binary_sensor"])
+                ),
+                vol.Optional(
+                    CONF_IDLE_REQUEST_ASSIST,
+                    default=defaults.get(
+                        CONF_IDLE_REQUEST_ASSIST, DEFAULT_IDLE_REQUEST_ASSIST
+                    ),
+                ): BooleanSelector(),
+                vol.Optional(
+                    CONF_IDLE_ASSIST_MAX_MINUTES,
+                    default=defaults.get(
+                        CONF_IDLE_ASSIST_MAX_MINUTES, DEFAULT_IDLE_ASSIST_MAX_MINUTES
+                    ),
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=5,
+                        max=120,
+                        step=5,
+                        unit_of_measurement="min",
+                        mode=NumberSelectorMode.BOX,
+                    )
                 ),
             }
         )

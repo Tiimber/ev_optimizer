@@ -77,6 +77,8 @@ class EVSmartChargerStatusSensor(EVSmartChargerBaseSensor):
             return "Disconnected"
         if data.get("should_charge_now"):
             return "Charging"
+        if data.get("idle_assist_active"):
+            return "Assisting Car Request"
         return "Waiting for Schedule"
 
     @property
@@ -88,6 +90,8 @@ class EVSmartChargerStatusSensor(EVSmartChargerBaseSensor):
             "target_soc": data.get("planned_target_soc"),
             "action_log": data.get("action_log", []),
             "latency_ms": data.get("latency_ms"),
+            "charger_status": data.get("charger_status"),
+            "idle_assist_active": bool(data.get("idle_assist_active")),
         }
 
 class EVMaxAvailableCurrentSensor(EVSmartChargerBaseSensor):

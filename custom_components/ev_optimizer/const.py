@@ -71,6 +71,43 @@ MEASUREMENT_SOURCES = ("energy", "power", "current", "commanded")
 CONF_CONTIGUOUS_CHARGING = "contiguous_charging"
 CONF_PREFER_LATE_SLOTS = "prefer_late_slots"
 
+# Optional: a sensor reporting the charger's own session state (Zaptec's
+# "charger mode", or the equivalent on another wallbox). It is the only way to
+# see the car *asking* for a session, which is what a plugged-in car does when
+# it wants to precondition the cabin from the grid rather than from the pack.
+CONF_CHARGER_STATUS_SENSOR = "charger_status_sensor"
+
+# Opt-in: when the plan has nothing left to deliver, grant current for as long
+# as the car keeps asking for it, instead of holding the limiter at 0 A.
+#
+# Holding 0 A leaves the session suspended, which is exactly right *mid-plan* —
+# it resumes in seconds without re-authorising. But after the target is met the
+# hold continues for hours, and a car that then asks for a session (to run its
+# cabin preconditioning off the grid) is refused and simply waits: it does not
+# fall back to the battery, so the preconditioning never runs. Granting until
+# the car stops asking hands that decision back to the car, which ends the
+# session at its own charge limit.
+CONF_IDLE_REQUEST_ASSIST = "idle_request_assist"
+CONF_IDLE_ASSIST_MAX_MINUTES = "idle_assist_max_minutes"
+
+# Charger states that mean "the car is asking for a session". Matched
+# case-insensitively, and any state containing "request" also counts, so a
+# wallbox with its own vocabulary still works.
+CHARGER_REQUEST_STATES = (
+    "connected_requesting",
+    "awaiting_start",
+    "requesting",
+    "waiting_for_car",
+)
+
+# Charger states that mean current is actually flowing. An assist must survive
+# the move from requesting to charging — cutting the grant the moment the car
+# starts drawing is the bug this feature exists to fix.
+CHARGER_ACTIVE_STATES = (
+    "connected_charging",
+    "charging",
+)
+
 # Nominal mains voltage, used only to turn currents into power when no power
 # sensor is configured.
 NOMINAL_VOLTAGE = 230.0
@@ -88,6 +125,18 @@ DEFAULT_TARGET_SOC_1 = 100
 DEFAULT_PRICE_LIMIT_2 = 1.5
 DEFAULT_TARGET_SOC_2 = 70
 DEFAULT_MIN_SOC = 20
+
+# Off by default: without a charger status sensor there is nothing to act on,
+# and an installation that never configures either is unaffected.
+DEFAULT_IDLE_REQUEST_ASSIST = False
+# A ceiling per plugged-in session, so a car that asks in a loop cannot hold the
+# charger open all night. Ten minutes of preconditioning plus the percent it
+# costs fits comfortably inside the default.
+DEFAULT_IDLE_ASSIST_MAX_MINUTES = 30
+# How far above the planned target an assist may take the battery before it is
+# withdrawn. The car normally stops itself at its own charge limit; this is the
+# backstop for the case where that limit sits above the plan's target.
+IDLE_ASSIST_SOC_OVERSHOOT = 1.0
 
 # Refresh Options
 REFRESH_NEVER = "never"

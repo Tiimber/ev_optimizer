@@ -47,6 +47,14 @@ from .const import (
     CONF_CHARGER_CURRENT_L3,
     CONF_CHARGER_POWER_SENSOR,
     CONF_CHARGER_ENERGY_SENSOR,
+    CONF_CHARGER_STATUS_SENSOR,
+    CONF_IDLE_REQUEST_ASSIST,
+    CONF_IDLE_ASSIST_MAX_MINUTES,
+    CHARGER_REQUEST_STATES,
+    CHARGER_ACTIVE_STATES,
+    DEFAULT_IDLE_REQUEST_ASSIST,
+    DEFAULT_IDLE_ASSIST_MAX_MINUTES,
+    IDLE_ASSIST_SOC_OVERSHOOT,
     CONF_CONTIGUOUS_CHARGING,
     CONF_PREFER_LATE_SLOTS,
     NOMINAL_VOLTAGE,
@@ -221,6 +229,12 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         # Overload prevention tracking
         self._last_overload_check_time = None
 
+        # Idle assist: granting current because the car is asking for a session
+        # after the plan is done. Minutes are budgeted per plugged-in session.
+        self._idle_assist_active = False
+        self._idle_assist_minutes = 0.0
+        self._idle_assist_last_tick = None
+
         # Calendar cache (see _async_get_calendar_events)
         self._calendar_events = []
         self._calendar_cache_time = None
@@ -286,6 +300,15 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             # way it always has until the user opts in.
             "contiguous_charging": bool(get_conf(CONF_CONTIGUOUS_CHARGING, False)),
             "prefer_late_slots": bool(get_conf(CONF_PREFER_LATE_SLOTS, False)),
+            # Off by default, and inert without a charger status sensor, so an
+            # existing install behaves exactly as before.
+            "idle_request_assist": bool(
+                get_conf(CONF_IDLE_REQUEST_ASSIST, DEFAULT_IDLE_REQUEST_ASSIST)
+            ),
+            "idle_assist_max_minutes": float(
+                get_conf(CONF_IDLE_ASSIST_MAX_MINUTES, DEFAULT_IDLE_ASSIST_MAX_MINUTES)
+                or DEFAULT_IDLE_ASSIST_MAX_MINUTES
+            ),
         }
 
         self.car_capacity = self.config_settings["car_capacity"]
@@ -333,6 +356,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             "ch_l3": get_conf(CONF_CHARGER_CURRENT_L3),
             "charger_power": get_conf(CONF_CHARGER_POWER_SENSOR),
             "charger_energy": get_conf(CONF_CHARGER_ENERGY_SENSOR),
+            "charger_status": get_conf(CONF_CHARGER_STATUS_SENSOR),
             "refresh_svc": get_conf(CONF_CAR_REFRESH_ACTION),
             "refresh_int": get_conf(CONF_CAR_REFRESH_INTERVAL),
         }
@@ -1755,7 +1779,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             # Update last sensor value for next comparison
             self._last_sensor_soc = sensor_soc_f
 
-        if self._last_applied_state == "charging":
+        if self._last_applied_state in ("charging", "assist"):
             seconds_passed = (current_time - self._last_update_time).total_seconds()
             hours_passed = max(0.0, seconds_passed / 3600.0)
 
@@ -1828,6 +1852,100 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         self._last_update_time = current_time
         return trust_sensor_period
 
+    def _car_is_requesting(self, status: str | None) -> bool:
+        if not status:
+            return False
+        return status in CHARGER_REQUEST_STATES or "request" in status
+
+    def _car_is_drawing(self, status: str | None) -> bool:
+        if not status:
+            return False
+        return status in CHARGER_ACTIVE_STATES or "charging" in status
+
+    def _evaluate_idle_assist(self, data: dict, plan: dict, should_charge: bool,
+                              safe_amps: int) -> bool:
+        """Decide whether to grant current to a car that is asking for it.
+
+        Holding the limiter at 0 A is right while the plan still owes the car
+        energy — the session stays suspended and resumes in seconds. It is wrong
+        once the plan is done: the hold persists for hours, and a car that then
+        asks for a session (to run cabin preconditioning off the grid rather
+        than off the pack) is refused and waits indefinitely. Granting for as
+        long as it keeps asking hands the decision back to the car, which ends
+        the session at its own charge limit.
+
+        Returns True while an assist should be active. Every gate below is a
+        reason the answer is no.
+        """
+        if not self.config_settings.get("idle_request_assist"):
+            return self._end_idle_assist(None)
+        if not self.conf_keys.get("charger_status"):
+            return self._end_idle_assist(None)
+        if not data.get("car_plugged", False):
+            return self._end_idle_assist("car unplugged")
+        if should_charge:
+            # The plan is driving; assist has nothing to add.
+            return self._end_idle_assist("plan resumed charging")
+
+        status = data.get("charger_status")
+        target_soc = float(plan.get("planned_target_soc", 0) or 0)
+        soc = float(data.get("car_soc", 0) or 0)
+
+        # Only once the plan has nothing left to deliver. Below target we are
+        # deliberately waiting for a cheaper hour, and that must still win.
+        if target_soc and soc + 0.5 < target_soc:
+            return self._end_idle_assist(None)
+
+        # Never buy more than the plan asked for. The car normally stops itself
+        # at its own charge limit; this is the backstop for a car limit that
+        # sits above the target.
+        if target_soc and soc > target_soc + IDLE_ASSIST_SOC_OVERSHOOT:
+            return self._end_idle_assist("target exceeded")
+
+        # Load balancing still outranks this. Below the 6 A floor there is
+        # nothing to grant.
+        if safe_amps < 6:
+            return self._end_idle_assist("house load leaves no headroom")
+
+        now = datetime.now()
+        if self._idle_assist_active:
+            # Bill the time actually spent assisting, then check the budget.
+            if self._idle_assist_last_tick:
+                elapsed = (now - self._idle_assist_last_tick).total_seconds() / 60.0
+                self._idle_assist_minutes += max(0.0, elapsed)
+            self._idle_assist_last_tick = now
+
+            budget = self.config_settings.get(
+                "idle_assist_max_minutes", DEFAULT_IDLE_ASSIST_MAX_MINUTES
+            )
+            if self._idle_assist_minutes >= budget:
+                return self._end_idle_assist(f"{budget:.0f} min budget spent")
+
+            # Hold the grant across requesting -> charging. Cutting it the
+            # moment the car starts drawing is the failure this fixes.
+            if self._car_is_requesting(status) or self._car_is_drawing(status):
+                return True
+            return self._end_idle_assist(f"car stopped asking ({status})")
+
+        if not self._car_is_requesting(status):
+            return False
+
+        self._idle_assist_active = True
+        self._idle_assist_last_tick = now
+        self._add_log(
+            f"Idle assist: car is asking for a session at {soc:.0f}% — granting current"
+        )
+        return True
+
+    def _end_idle_assist(self, reason: str | None) -> bool:
+        """Clear an active assist, logging why. Always returns False."""
+        if self._idle_assist_active:
+            self._idle_assist_active = False
+            self._idle_assist_last_tick = None
+            if reason:
+                self._add_log(f"Idle assist ended: {reason}")
+        return False
+
     async def _apply_charger_control(self, data: dict, plan: dict):
         if datetime.now() - self._startup_time < timedelta(minutes=2):
             return
@@ -1837,6 +1955,15 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
         should_charge = data.get("should_charge_now", False)
         safe_amps = math.floor(data.get("max_available_current", 0))
+
+        # A car asking for a session after the plan is done gets one, rather
+        # than being left waiting on a 0 A hold. See _evaluate_idle_assist.
+        try:
+            assist_now = self._evaluate_idle_assist(data, plan, should_charge, safe_amps)
+        except Exception:
+            _LOGGER.exception("Idle assist evaluation failed; holding the plan's decision")
+            assist_now = self._end_idle_assist(None)
+        data["idle_assist_active"] = assist_now
 
         maintenance_now = (
             "Maintenance mode active" in plan.get("charging_summary", "") and should_charge
@@ -1866,8 +1993,15 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 # Reset the overload check timer when not in overload state
                 self._last_overload_check_time = None
 
-            target_amps = safe_amps if should_charge else 0
-            desired_state = "charging" if should_charge else "paused"
+            if should_charge:
+                target_amps = safe_amps
+                desired_state = "charging"
+            elif assist_now:
+                target_amps = safe_amps
+                desired_state = "assist"
+            else:
+                target_amps = 0
+                desired_state = "paused"
 
         target_soc = int(plan.get("planned_target_soc", 80))
         is_starting = (
@@ -1910,7 +2044,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 except Exception as e:
                     _LOGGER.error(f"Car Limit Service Failed: {e}")
 
-        if should_charge:
+        if should_charge or desired_state == "assist":
             # Mark that we charged in this interval (only if we actually drew current)
             if target_amps > 0:
                 self.session_manager.mark_charging_in_interval()
@@ -1924,9 +2058,12 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                             {"entity_id": self.conf_keys["zap_switch"]},
                             blocking=True,
                         )
-                        state_msg = (
-                            "CHARGING" if target_amps > 0 else "MAINTENANCE (0A)"
-                        )
+                        if desired_state == "assist":
+                            state_msg = "ASSIST (car requested)"
+                        elif target_amps > 0:
+                            state_msg = "CHARGING"
+                        else:
+                            state_msg = "MAINTENANCE (0A)"
                         self._add_log(f"Switched Charging state to: {state_msg}")
                         self._add_log(f"Setting charger to {int(target_amps)}A")
                     elif self.conf_keys.get("zap_resume"):
@@ -1973,7 +2110,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                     _LOGGER.error(f"Failed to set Zaptec limit: {e}")
 
         else:
-            is_stopping = self._last_applied_state in ("charging", "maintenance")
+            is_stopping = self._last_applied_state in ("charging", "maintenance", "assist")
 
             # Only touch the Zaptec limiter when we are actively stopping charging.
             # Outside planned charging windows we keep the limiter unchanged to avoid
@@ -2045,6 +2182,14 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         data["ch_l3"] = get_float(self.conf_keys.get("ch_l3"))
         # Read Zaptec limiter value for load balancing fallback
         data["zap_limit_value"] = get_float(self.conf_keys.get("zap_limit"))
+
+        # The charger's own session state, when one is configured. Normalised
+        # here so every consumer compares the same lowercase string.
+        status_state = get_state(self.conf_keys.get("charger_status"))
+        if status_state and status_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            data["charger_status"] = str(status_state.state).strip().lower()
+        else:
+            data["charger_status"] = None
 
         plugged_state = get_state(self.conf_keys["car_plugged"])
         if plugged_state:
@@ -2127,6 +2272,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
             # Reset overload prevention timer for new session
             self._last_overload_check_time = None
+
+            # A fresh cable means a fresh assist budget.
+            self._idle_assist_minutes = 0.0
+            self._end_idle_assist(None)
             
             # Reset automatic image generation tracking for new session
             self._last_plan_image_signature = None
