@@ -105,6 +105,7 @@
           "price_limit_2": "Price Limit: Acceptable (High)",
           "target_soc_2": "Target SoC at Acceptable Prices",
           "prefer_late_slots": "Finish charging close to departure",
+          "departure_margin_minutes": "Finish this many minutes before departure",
           "contiguous_charging": "Charge in one unbroken block"
         },
         "data_description": {
@@ -116,6 +117,7 @@
           "price_limit_2": "Nordpool price threshold for 'acceptable' electricity (before taxes). Charge to this target when prices are moderate.",
           "target_soc_2": "Target SoC when prices are acceptable (typically 70-80%).",
           "prefer_late_slots": "When several slots cost the same, use the later ones. Costs nothing extra and leaves the battery at a high state of charge for fewer hours before you leave.",
+          "departure_margin_minutes": "Slack for load balancing and early departures: the plan aims to be done this long before you leave. Ignored when there is not enough time for it. 0 plans right up to departure.",
           "contiguous_charging": "Charge in a single unbroken stretch instead of the cheapest scattered slots. Usually costs a little more, but starts and stops the charger only once."
         }
       }
@@ -234,6 +236,7 @@
           "price_limit_2": "Price Limit: Acceptable (High)",
           "target_soc_2": "Target SoC at Acceptable Prices",
           "prefer_late_slots": "Finish charging close to departure",
+          "departure_margin_minutes": "Finish this many minutes before departure",
           "contiguous_charging": "Charge in one unbroken block"
         },
         "data_description": {
@@ -245,6 +248,7 @@
           "price_limit_2": "Nordpool price threshold for 'acceptable' electricity (before taxes). Charge to this target when prices are moderate.",
           "target_soc_2": "Target SoC when prices are acceptable (typically 70-80%).",
           "prefer_late_slots": "When several slots cost the same, use the later ones. Costs nothing extra and leaves the battery at a high state of charge for fewer hours before you leave.",
+          "departure_margin_minutes": "Slack for load balancing and early departures: the plan aims to be done this long before you leave. Ignored when there is not enough time for it. 0 plans right up to departure.",
           "contiguous_charging": "Charge in a single unbroken stretch instead of the cheapest scattered slots. Usually costs a little more, but starts and stops the charger only once."
         }
       }

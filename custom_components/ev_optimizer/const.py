@@ -71,6 +71,13 @@ MEASUREMENT_SOURCES = ("energy", "power", "current", "commanded")
 CONF_CONTIGUOUS_CHARGING = "contiguous_charging"
 CONF_PREFER_LATE_SLOTS = "prefer_late_slots"
 
+# CONF_DEPARTURE_MARGIN: plan to finish this many minutes before departure, so
+#   time lost to load balancing (throttled or paused for house load) or an early
+#   departure does not leave the car short. Falls back to the full window when
+#   the margin would make the target unreachable. 0 keeps the old behaviour.
+CONF_DEPARTURE_MARGIN = "departure_margin_minutes"
+DEFAULT_DEPARTURE_MARGIN = 0
+
 # Optional: a sensor reporting the charger's own session state (Zaptec's
 # "charger mode", or the equivalent on another wallbox). It is the only way to
 # see the car *asking* for a session, which is what a plugged-in car does when

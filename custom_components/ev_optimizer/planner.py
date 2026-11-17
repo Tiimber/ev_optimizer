@@ -233,6 +233,28 @@ def select_charging_slots(
     )[:slots_needed]
 
 
+def window_with_departure_margin(
+    calc_window: list, dept_dt: datetime, margin_minutes: float, slots_needed: int
+) -> tuple[list, bool]:
+    """Restrict slot selection to slots that end `margin_minutes` before departure.
+
+    A plan that needs every remaining minute at full power has nothing to give
+    when load balancing throttles or pauses the charger, or when the driver
+    leaves a little early. Finishing ahead of departure turns that into slack.
+
+    Returns (window, applied). When the margin would leave fewer slots than the
+    charge needs, the full window is returned instead: reaching the target late
+    is better than planning not to reach it at all.
+    """
+    if margin_minutes <= 0 or slots_needed <= 0:
+        return calc_window, False
+    cutoff = dept_dt - timedelta(minutes=margin_minutes)
+    narrowed = [s for s in calc_window if s["end"] <= cutoff]
+    if len(narrowed) < slots_needed:
+        return calc_window, False
+    return narrowed, True
+
+
 def calculate_load_balancing(data: dict, max_fuse: float) -> float:
     """Calculate the safe current available for the charger."""
     p1_l1 = data.get("p1_l1", 0.0)
@@ -771,8 +793,21 @@ def generate_charging_plan(
             slots_needed += buffer_slots
             _LOGGER.debug("⏰ Learning phase: adding %d slots (30min safety buffer)", buffer_slots)
         
+        margin_min = float(config_settings.get("departure_margin_minutes", 0) or 0)
+        selection_window, margin_applied = window_with_departure_margin(
+            calc_window, dept_dt, margin_min, slots_needed
+        )
+        plan["departure_margin_applied"] = margin_applied
+        if margin_min > 0:
+            _LOGGER.debug(
+                "⏳ Departure margin %.0f min: %s (%d of %d slots eligible)",
+                margin_min,
+                "applied" if margin_applied else "not enough time, using full window",
+                len(selection_window), len(calc_window),
+            )
+
         selected_slots = select_charging_slots(
-            calc_window,
+            selection_window,
             slots_needed,
             contiguous=config_settings.get("contiguous_charging", False),
             prefer_late=config_settings.get("prefer_late_slots", False),

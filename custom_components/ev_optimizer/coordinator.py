@@ -62,6 +62,8 @@ from .const import (
     MIN_CHARGE_AMPS,
     CONF_CONTIGUOUS_CHARGING,
     CONF_PREFER_LATE_SLOTS,
+    CONF_DEPARTURE_MARGIN,
+    DEFAULT_DEPARTURE_MARGIN,
     NOMINAL_VOLTAGE,
     DEFAULT_CURRENCY,
     DEFAULT_LOSS,
@@ -182,6 +184,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
         # State tracking to prevent API spamming
         self._last_applied_amps = -1
+        self._limiter_close_failed_at = None
         self._last_applied_state = None  # "charging" or "paused"
         self._last_applied_car_limit = -1
         # Diagnostics for the two ways this integration can silently drift
@@ -312,6 +315,9 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             # way it always has until the user opts in.
             "contiguous_charging": bool(get_conf(CONF_CONTIGUOUS_CHARGING, False)),
             "prefer_late_slots": bool(get_conf(CONF_PREFER_LATE_SLOTS, False)),
+            "departure_margin_minutes": float(
+                get_conf(CONF_DEPARTURE_MARGIN, DEFAULT_DEPARTURE_MARGIN) or 0
+            ),
             # Off by default, and inert without a charger status sensor, so an
             # existing install behaves exactly as before.
             "idle_request_assist": bool(
@@ -2195,11 +2201,25 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
         else:
             is_stopping = self._last_applied_state in ("charging", "maintenance", "assist")
+            # _last_applied_amps is -1 after a plug-in or restart: we do not know
+            # what the limiter holds, and it may still be open from an earlier
+            # session. Pausing used to write 0 A only when stopping a charge we
+            # had started, so a fresh plug-in found the limiter at 16 A and the
+            # car charged at full power, at whatever the price, while the plan
+            # said "waiting" (2026-11-17). Close it whenever it is not known to
+            # be closed; once it is 0 this stays quiet, so there is no spam.
+            limiter_not_closed = self._last_applied_amps != 0
+            # A failed close is retried at most once a minute, not every tick:
+            # the limiter is a cloud API, and an unthrottled retry is how the
+            # Hyundai account got locked (2026-10-15).
+            now_utc = datetime.now(timezone.utc)
+            close_backoff = (
+                not is_stopping
+                and self._limiter_close_failed_at is not None
+                and (now_utc - self._limiter_close_failed_at).total_seconds() < 60
+            )
 
-            # Only touch the Zaptec limiter when we are actively stopping charging.
-            # Outside planned charging windows we keep the limiter unchanged to avoid
-            # unnecessary toggling/spam.
-            if is_stopping and self.conf_keys["zap_limit"]:
+            if (is_stopping or limiter_not_closed) and not close_backoff and self.conf_keys["zap_limit"]:
                 try:
                     await self.hass.services.async_call(
                         "number",
@@ -2209,8 +2229,10 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                     )
                     self._last_applied_amps = 0
                     self._note_limiter_write(data)
-                    self._add_log(f"Pausing: Set Zaptec limit to 0A")
+                    self._limiter_close_failed_at = None
+                    self._add_log("Pausing: Set Zaptec limit to 0A")
                 except Exception as e:
+                    self._limiter_close_failed_at = now_utc
                     _LOGGER.error(f"Failed to set Zaptec limit to 0: {e}")
 
             if desired_state != self._last_applied_state:
@@ -2537,6 +2559,25 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                     _LOGGER.error(
                         "Failed to turn off charger switch %s",
                         self.conf_keys["zap_switch"], exc_info=True,
+                    )
+            # Leave the limiter closed for the next car. The plug sensor can lag
+            # the charger by a minute, and load balancing keeps writing current
+            # in that gap (16 A on 2026-11-17), which then sat there all day.
+            if self.conf_keys.get("zap_limit"):
+                try:
+                    await self.hass.services.async_call(
+                        "number",
+                        "set_value",
+                        {"entity_id": self.conf_keys["zap_limit"], "value": 0},
+                        blocking=True,
+                    )
+                    self._last_applied_amps = 0
+                    self._add_log("Unplugged: Set Zaptec limit to 0A")
+                except Exception:
+                    self._last_applied_amps = -1
+                    _LOGGER.error(
+                        "Failed to close charger limit %s on unplug",
+                        self.conf_keys["zap_limit"], exc_info=True,
                     )
             self._last_applied_state = "paused"
             self._last_applied_car_limit = -1

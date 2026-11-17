@@ -60,6 +60,8 @@ from .const import (
     DEFAULT_IDLE_ASSIST_MAX_MINUTES,
     CONF_CONTIGUOUS_CHARGING,
     CONF_PREFER_LATE_SLOTS,
+    CONF_DEPARTURE_MARGIN,
+    DEFAULT_DEPARTURE_MARGIN,
     REFRESH_NEVER,
     REFRESH_30_MIN,
     REFRESH_1_HOUR,
@@ -415,6 +417,18 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_CONTIGUOUS_CHARGING,
                     default=defaults.get(CONF_CONTIGUOUS_CHARGING, False),
                 ): BooleanSelector(),
+                vol.Optional(
+                    CONF_DEPARTURE_MARGIN,
+                    default=defaults.get(CONF_DEPARTURE_MARGIN, DEFAULT_DEPARTURE_MARGIN),
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=0,
+                        max=120,
+                        step=15,
+                        unit_of_measurement="min",
+                        mode=NumberSelectorMode.SLIDER,
+                    )
+                ),
                 vol.Required(
                     ENTITY_TARGET_SOC,
                     default=defaults.get(ENTITY_TARGET_SOC, DEFAULT_TARGET_SOC),

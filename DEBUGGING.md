@@ -116,7 +116,8 @@ DEBUG STATE DUMP - Copy everything between the markers:
     "currency": "SEK",
     "has_price_sensor": true,
     "contiguous_charging": false,
-    "prefer_late_slots": false
+    "prefer_late_slots": false,
+    "departure_margin_minutes": 0.0
   },
   "user_settings": {
     "target_soc": 80,

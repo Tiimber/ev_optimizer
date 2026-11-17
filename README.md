@@ -73,9 +73,10 @@ During setup, you will map your existing Home Assistant entities:
     * **Switch (Recommended):** The main switch entity for the charger (e.g., `switch.zaptec_charging`).
     * **Limiter:** The entity to set the current limit (Amps).
 * **Settings:** Main Fuse Size (A), Charger Efficiency Loss (%), and Currency.
-* **Scheduling Preferences (Optional, both default off):**
+* **Scheduling Preferences (Optional, all default off):**
     * **Finish charging close to departure:** When several price slots cost the same, use the later ones. Costs nothing and reduces the hours the pack spends sitting at a high state of charge.
     * **Charge in one unbroken block:** Charge in a single stretch rather than the cheapest scattered slots. Usually costs more; starts and stops the charger only once.
+    * **Finish this many minutes before departure:** Plans the charge to be done ahead of departure, so time lost to load balancing (the charger throttled or paused while the house draws a lot) or leaving a little early does not leave the car short. Ignored for a session when there is not enough time to charge within the margin. 30–45 minutes is a sensible value if load balancing often limits your charger at night.
 * **Calendar (Optional):** A Local Calendar entity to read for trip planning, or advanced recurring travel.
 
 ## Advanced Configuration Parameters
@@ -221,6 +222,8 @@ The system protects your home's electrical system by calculating the maximum saf
 * **Real-time Adjustment:** The system listens for immediate updates from your electricity meter (P1) and recalculates available current instantly (with a 2-second debounce), providing protection against overload spikes.
 
 > **Fixed in v1.1.25:** the limiter fallback previously treated that value as a total and divided it across three phases, under-subtracting the charger's own draw. On installations without charger current sensors this made the charger's draw read as house load, producing a start/stop oscillation every update cycle. If you charge without charger current sensors and have seen the charger cycling, this was why.
+
+* **Limiter closed while waiting:** whenever the plan says not to charge, the limiter is set to 0 A — including right after a plug-in, a restart, and on unplug. Earlier versions only closed it when stopping a charge they had started themselves, so a limiter left open by the previous session (or by load balancing in the seconds before the car's plug sensor noticed an unplug) let the next car charge at full power regardless of price. A failed write is retried at most once a minute.
 
 If charging is prevented due to insufficient current, the system automatically compensates by extending your charging schedule into cheaper price slots, ensuring you still reach your target on time.
 
