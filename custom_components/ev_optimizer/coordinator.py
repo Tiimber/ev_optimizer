@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 import logging
 import math
-from datetime import timedelta, datetime, time
+from datetime import timedelta, datetime, time, timezone
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -55,6 +56,10 @@ from .const import (
     DEFAULT_IDLE_REQUEST_ASSIST,
     DEFAULT_IDLE_ASSIST_MAX_MINUTES,
     IDLE_ASSIST_SOC_OVERSHOOT,
+    STALE_CHARGER_READING_GRACE_SECONDS,
+    SAFETY_CUTOFF_CONFIRM_SECONDS,
+    SAFETY_CUTOFF_HOLD_SECONDS,
+    MIN_CHARGE_AMPS,
     CONF_CONTIGUOUS_CHARGING,
     CONF_PREFER_LATE_SLOTS,
     NOMINAL_VOLTAGE,
@@ -228,6 +233,13 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
 
         # Overload prevention tracking
         self._last_overload_check_time = None
+
+        # Safety-cutoff damping. See _charger_currents_for_balancing and the
+        # cutoff block in _apply_charger_control for why each exists.
+        self._last_limiter_write_time = None  # tz-aware UTC
+        self._limiter_write_meter = None  # (p1_l1, p1_l2, p1_l3) at that write
+        self._cutoff_pending_since = None
+        self._safety_hold_until = None
 
         # Idle assist: granting current because the car is asking for a session
         # after the plan is done. Minutes are budgeted per plugged-in session.
@@ -800,8 +812,11 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             # must not guess high — an unknown house load with the charger left
             # at full current is how the main fuse trips.
             try:
+                balancing_inputs, data["charger_reading_stale"] = (
+                    self._charger_currents_for_balancing(data)
+                )
                 data["max_available_current"] = calculate_load_balancing(
-                    data, self.config_settings["max_fuse"]
+                    balancing_inputs, self.config_settings["max_fuse"]
                 )
             except Exception:
                 _LOGGER.exception(
@@ -1275,6 +1290,13 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 if interval_mode == REFRESH_AT_TARGET and self.session_manager.current_session:
                     self.learning_state[LEARNING_LAST_REFRESH] = refresh_time.isoformat()
         except Exception as e:
+            # A failed attempt counts against the interval exactly like a
+            # successful one. Otherwise the throttle never engages and every
+            # coordinator tick (the P1 meter alone ticks every 10 s) retries
+            # the car's cloud API, which got a Hyundai account logged out for
+            # "unusual activity" (code 9035). The learning timestamps stay
+            # untouched: no fresh reading is on its way.
+            self._last_car_refresh_time = datetime.now()
             _LOGGER.error(f"Failed to force refresh car: {e}")
 
     def _reset_learning_window(self):
@@ -1969,29 +1991,75 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             "Maintenance mode active" in plan.get("charging_summary", "") and should_charge
         )
 
+        # A safety cutoff holds its pause for a minimum time. Without it the
+        # very next meter tick — which no longer carries the car's draw — reads
+        # as headroom, the charger resumes, and the cycle repeats every twenty
+        # seconds. Each of those pauses is a "connected but not charging" push
+        # on the driver's phone; ten were counted in three and a half minutes.
+        now = datetime.now()
+        in_hold = (
+            self._safety_hold_until is not None and now < self._safety_hold_until
+        )
+        if not in_hold:
+            self._safety_hold_until = None
+        elif assist_now:
+            assist_now = self._end_idle_assist("pause held after a safety cutoff")
+            data["idle_assist_active"] = False
+
         # Maintenance mode is intentionally 0A, so it must not be blocked by the
         # minimum 6A safety cutoff and must not count as overload prevention.
         if maintenance_now:
             target_amps = 0
             desired_state = "maintenance"
         else:
-            if safe_amps < 6:
+            if safe_amps < MIN_CHARGE_AMPS:
                 if should_charge:
-                    self._add_log(
-                        f"Safety Cutoff: Available {safe_amps}A is below minimum 6A. Pausing."
-                    )
-                    # Track actual minutes lost to overload prevention
-                    # (handles variable update intervals from P1 listener triggers)
-                    now = datetime.now()
-                    if self._last_overload_check_time is not None:
-                        elapsed_seconds = (now - self._last_overload_check_time).total_seconds()
-                        elapsed_minutes = elapsed_seconds / 60.0
-                        self.session_manager.add_overload_minutes(elapsed_minutes)
-                    self._last_overload_check_time = now
-                should_charge = False
+                    first_sighting = self._cutoff_pending_since is None
+                    if first_sighting:
+                        self._cutoff_pending_since = now
+                    pending_for = (now - self._cutoff_pending_since).total_seconds()
+                    if (
+                        safe_amps > 0
+                        and not in_hold
+                        and pending_for < SAFETY_CUTOFF_CONFIRM_SECONDS
+                    ):
+                        # Marginal, not overloaded: the house alone still fits.
+                        # Hold the floor for one more reading rather than pause
+                        # on a single sample, which is usually the charger's own
+                        # draw not yet reported back. 0 A is never marginal.
+                        if first_sighting:
+                            self._add_log(
+                                f"Headroom {safe_amps}A is below the {MIN_CHARGE_AMPS}A "
+                                f"floor; holding {MIN_CHARGE_AMPS}A until the next "
+                                "reading confirms it"
+                            )
+                        safe_amps = MIN_CHARGE_AMPS
+                    else:
+                        if not in_hold:
+                            self._add_log(
+                                f"Safety Cutoff: Available {safe_amps}A is below minimum "
+                                f"{MIN_CHARGE_AMPS}A. Pausing for at least "
+                                f"{SAFETY_CUTOFF_HOLD_SECONDS}s."
+                            )
+                            self._safety_hold_until = now + timedelta(
+                                seconds=SAFETY_CUTOFF_HOLD_SECONDS
+                            )
+                        # Track actual minutes lost to overload prevention
+                        # (handles variable update intervals from P1 listener triggers)
+                        if self._last_overload_check_time is not None:
+                            elapsed_seconds = (now - self._last_overload_check_time).total_seconds()
+                            elapsed_minutes = elapsed_seconds / 60.0
+                            self.session_manager.add_overload_minutes(elapsed_minutes)
+                        self._last_overload_check_time = now
+                        should_charge = False
+                else:
+                    self._cutoff_pending_since = None
             else:
                 # Reset the overload check timer when not in overload state
+                self._cutoff_pending_since = None
                 self._last_overload_check_time = None
+                if should_charge and in_hold:
+                    should_charge = False
 
             if should_charge:
                 target_amps = safe_amps
@@ -2049,6 +2117,21 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
             if target_amps > 0:
                 self.session_manager.mark_charging_in_interval()
 
+            if desired_state != self._last_applied_state and self._car_is_drawing(
+                data.get("charger_status")
+            ):
+                # The charger is already delivering — typically after a restart
+                # in the middle of a session. Zaptec refuses a resume for a
+                # running session ("Resuming charging failed"), and while that
+                # kept failing the state never became "charging", so every
+                # cycle retried the switch and, via is_starting, rewrote the
+                # car limit: a cloud call to the car every 30 s.
+                self._add_log(
+                    f"Charger already {data.get('charger_status')}; "
+                    "taking over the running session"
+                )
+                self._last_applied_state = desired_state
+
             if desired_state != self._last_applied_state:
                 try:
                     if self.conf_keys.get("zap_switch"):
@@ -2102,6 +2185,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                         blocking=True,
                     )
                     self._last_applied_amps = target_amps
+                    self._note_limiter_write(data)
                     if target_amps > 0:
                         self._add_log(
                             f"Adjusted charger to {int(target_amps)}A (Load Balancing)"
@@ -2124,6 +2208,7 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                         blocking=True,
                     )
                     self._last_applied_amps = 0
+                    self._note_limiter_write(data)
                     self._add_log(f"Pausing: Set Zaptec limit to 0A")
                 except Exception as e:
                     _LOGGER.error(f"Failed to set Zaptec limit to 0: {e}")
@@ -2156,6 +2241,96 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
                 except Exception as e:
                     _LOGGER.error(f"Failed to switch Zaptec state to PAUSED: {e}")
 
+    def _note_limiter_write(self, data: dict):
+        """Remember when the limiter was last written and what the meter read."""
+        try:
+            self._last_limiter_write_time = datetime.now(timezone.utc)
+        except Exception:
+            self._last_limiter_write_time = None
+            return
+        self._limiter_write_meter = (
+            float(data.get("p1_l1", 0.0) or 0.0),
+            float(data.get("p1_l2", 0.0) or 0.0),
+            float(data.get("p1_l3", 0.0) or 0.0),
+        )
+
+    def _charger_currents_for_balancing(self, data: dict) -> tuple[dict, bool]:
+        """Load-balancing inputs with charger readings that lag the meter corrected.
+
+        The house meter ticks every few seconds and the coordinator refreshes on
+        each tick, but the charger integration reports its per-phase current a
+        second or three later. So on the first tick after a limiter write the
+        meter already carries the car's new draw while the charger sensor still
+        describes the old one, and calculate_load_balancing books the difference
+        as house load. On a resume that reads as an overload and pauses the
+        charger; the next tick is low again, it resumes, and the loop runs until
+        the two polls happen to land the other way round. Measured live:
+        meter 18.1 A, charger 0.05 A, "available 0 A" — with 12.9 A of house.
+
+        A charger reading that predates the last write is therefore corrected
+        by the meter's own change since that write, clamped to what could
+        possibly be the charger's: never below 0, never above the larger of the
+        commanded and the previously reported current. That covers a resume
+        (0 + rise), a reduction (old - fall), a pause (old - old) and a car
+        that only draws on one phase (the other phases did not rise). The
+        error is the house's own change over those few seconds. Anything else
+        — no charger sensor, no write yet, the meter not ticked since, or the
+        grace window over — leaves the data untouched.
+
+        Returns the inputs to use and whether anything was substituted.
+        """
+        try:
+            return self._substitute_stale_charger_readings(data)
+        except Exception:
+            # Never let bookkeeping take the safety loop down: the raw
+            # readings are what every install ran on before this existed.
+            _LOGGER.debug("Stale-reading correction skipped", exc_info=True)
+            return data, False
+
+    def _substitute_stale_charger_readings(self, data: dict) -> tuple[dict, bool]:
+        write = self._last_limiter_write_time
+        meter_at = data.get("p1_reported_at")
+        if (
+            write is None
+            or meter_at is None
+            or self._limiter_write_meter is None
+            or self._last_applied_amps is None
+            or self._last_applied_amps < 0
+        ):
+            return data, False
+        now = datetime.now(timezone.utc)
+        if now - write > timedelta(seconds=STALE_CHARGER_READING_GRACE_SECONDS):
+            return data, False
+        if meter_at < write:
+            # The meter has not ticked since the write either; both readings
+            # describe the same moment and agree with each other.
+            return data, False
+
+        commanded = float(self._last_applied_amps)
+        stamps = data.get("charger_reported_at") or {}
+        substituted = {}
+        for idx, key in enumerate(("ch_l1", "ch_l2", "ch_l3")):
+            if not self.conf_keys.get(key):
+                continue
+            reported_at = stamps.get(key)
+            if reported_at is not None and reported_at >= write:
+                continue
+            old_reading = float(data.get(key, 0.0) or 0.0)
+            meter_now = float(data.get(f"p1_l{idx + 1}", 0.0) or 0.0)
+            rise = meter_now - self._limiter_write_meter[idx]
+            ceiling = max(commanded, old_reading)
+            substituted[key] = min(ceiling, max(0.0, old_reading + rise))
+        if not substituted:
+            return data, False
+
+        _LOGGER.debug(
+            "Charger readings predate the limiter write; using meter change instead: %s",
+            substituted,
+        )
+        adjusted = dict(data)
+        adjusted.update(substituted)
+        return adjusted, True
+
     def _fetch_sensor_data(self) -> dict:
         data = {}
 
@@ -2182,6 +2357,33 @@ class EVSmartChargerCoordinator(DataUpdateCoordinator):
         data["ch_l3"] = get_float(self.conf_keys.get("ch_l3"))
         # Read Zaptec limiter value for load balancing fallback
         data["zap_limit_value"] = get_float(self.conf_keys.get("zap_limit"))
+
+        # When each reading was taken, so load balancing can tell a charger
+        # sensor that has not caught up with the meter from one that has.
+        def reported_at(entity_id):
+            state = get_state(entity_id)
+            if state is None:
+                return None
+            stamp = getattr(state, "last_reported", None) or getattr(
+                state, "last_updated", None
+            )
+            # The real class, via the module: tests patch this file's
+            # `datetime` name with a mock, and a mock passes any attribute check.
+            if not isinstance(stamp, _dt.datetime):
+                return None
+            try:
+                return stamp.astimezone(timezone.utc)
+            except (TypeError, ValueError):
+                return None
+
+        meter_stamps = [
+            reported_at(self.conf_keys.get(k)) for k in ("p1_l1", "p1_l2", "p1_l3")
+        ]
+        meter_stamps = [s for s in meter_stamps if s is not None]
+        data["p1_reported_at"] = max(meter_stamps) if meter_stamps else None
+        data["charger_reported_at"] = {
+            k: reported_at(self.conf_keys.get(k)) for k in ("ch_l1", "ch_l2", "ch_l3")
+        }
 
         # The charger's own session state, when one is configured. Normalised
         # here so every consumer compares the same lowercase string.

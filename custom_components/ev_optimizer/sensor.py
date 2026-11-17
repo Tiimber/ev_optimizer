@@ -92,6 +92,7 @@ class EVSmartChargerStatusSensor(EVSmartChargerBaseSensor):
             "latency_ms": data.get("latency_ms"),
             "charger_status": data.get("charger_status"),
             "idle_assist_active": bool(data.get("idle_assist_active")),
+            "charger_reading_stale": bool(data.get("charger_reading_stale")),
         }
 
 class EVMaxAvailableCurrentSensor(EVSmartChargerBaseSensor):

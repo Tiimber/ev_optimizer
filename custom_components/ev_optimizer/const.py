@@ -138,6 +138,23 @@ DEFAULT_IDLE_ASSIST_MAX_MINUTES = 30
 # backstop for the case where that limit sits above the plan's target.
 IDLE_ASSIST_SOC_OVERSHOOT = 1.0
 
+# Load-balancing safety timing.
+#
+# The charger's own draw appears on the house meter one to three seconds
+# before the charger integration reports it, so the first meter tick after a
+# limiter write books the car's current as house load. Readings that predate
+# the write are corrected from the meter's own change for this long.
+STALE_CHARGER_READING_GRACE_SECONDS = 30
+# Headroom below the floor pauses only once it has persisted this long, unless
+# it is 0 A (the house alone is at the fuse). One extra meter tick at the floor
+# is nothing to a fuse; a pause is a push notification on the driver's phone.
+SAFETY_CUTOFF_CONFIRM_SECONDS = 5
+# After a safety cutoff the pause is held at least this long so a resume can
+# never follow within the next tick and re-run the same race.
+SAFETY_CUTOFF_HOLD_SECONDS = 60
+# The lowest current an EVSE can offer; below it the session must pause.
+MIN_CHARGE_AMPS = 6
+
 # Refresh Options
 REFRESH_NEVER = "never"
 REFRESH_30_MIN = "30_min"
