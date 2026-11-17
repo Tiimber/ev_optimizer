@@ -201,7 +201,7 @@ def test_trigger_report_generation_uses_session_manager(pkg_loader, hass_mock):
 
     # Should not raise (this used to crash looking for coord.current_session)
     import asyncio
-    asyncio.get_event_loop().run_until_complete(coord.async_trigger_report_generation())
+    asyncio.run(coord.async_trigger_report_generation())
 
 
 def test_virtual_soc_ignores_wobble_during_charging(pkg_loader, hass_mock):
